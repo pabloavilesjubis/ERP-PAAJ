@@ -109,6 +109,38 @@ export function buildCcfData(args: {
   };
 }
 
+export interface NcReference {
+  /** codigoGeneracion del CCF original. */
+  ccfCodigo: string;
+  /** Fecha de emisión del CCF original (YYYY-MM-DD). */
+  ccfFecha: string;
+}
+
+export function buildNcData(args: {
+  consecutivo: number;
+  lines: CartLine[];
+  receptor: Contribuyente;
+  ncRef: NcReference;
+}): Record<string, unknown> {
+  // NC = CCF + documentoRelacionado obligatorio apuntando al CCF original.
+  const base = buildCcfData({
+    consecutivo: args.consecutivo,
+    lines: args.lines,
+    receptor: args.receptor,
+  });
+  return {
+    ...base,
+    documentoRelacionado: [
+      {
+        tipoDocumento: '03',          // CCF electrónico
+        tipoGeneracion: 2,            // 2 = electrónico
+        numeroDocumento: args.ncRef.ccfCodigo,
+        fechaEmision: args.ncRef.ccfFecha,
+      },
+    ],
+  };
+}
+
 export function buildFseData(args: {
   consecutivo: number;
   lines: CartLine[];

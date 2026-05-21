@@ -34,6 +34,14 @@ export interface VentaConsumidorMetadata {
   subtotal?: string;
   iva?: string;
   source?: 'pos' | 'manual';
+  /** JWS compacto del DTE firmado — preserva el JSON original en payload base64. */
+  documentoJws?: string;
+  /** Si se ejecutó una anulación contra este DTE, el código del evento + sello. */
+  anulado?: boolean;
+  codigoEventoAnulacion?: string;
+  selloEventoAnulacion?: string;
+  fechaAnulacion?: string;
+  motivoAnulacion?: string;
 }
 
 export interface VentaConsumidor {
@@ -62,6 +70,16 @@ export interface VentaContribuyenteMetadata {
   source?: 'manual' | 'imported';
   pdfPath?: string;              // si más adelante se adjunta PDF
   pdfFilename?: string;
+  /** JWS compacto del DTE firmado — preserva el JSON original en payload base64. */
+  documentoJws?: string;
+  /** Si se ejecutó una anulación contra este DTE, el código del evento + sello. */
+  anulado?: boolean;
+  codigoEventoAnulacion?: string;
+  selloEventoAnulacion?: string;
+  fechaAnulacion?: string;
+  motivoAnulacion?: string;
+  /** Si esta venta es una Nota de Crédito, referencia al CCF original. */
+  ncRelacionadaCodigo?: string;     // codigoGeneracion del CCF al que ajusta
 }
 
 export interface VentaContribuyente {

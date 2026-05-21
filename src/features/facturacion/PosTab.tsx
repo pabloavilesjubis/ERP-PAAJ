@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -11,7 +11,8 @@ import {
   ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, getMunicipiosFor,
 } from '@/lib/catalogos/mh';
 import {
-  buildCcfData, buildFcfData, buildFseData, calcCartTotals, type CartLine,
+  buildCcfData, buildFcfData, buildFseData, buildNcData, calcCartTotals,
+  type CartLine, type NcReference,
 } from '@/lib/dte/payload';
 import {
   DteServiceError, emitDte, pingDteService, type DteEmitSuccess, type DteTipo,
@@ -58,7 +59,19 @@ const emptyClienteForm: ClienteForm = {
 
 type TipoFilter = 'todos' | 'servicio' | 'bien';
 
-export function PosTab() {
+export interface NcContext {
+  ref: NcReference;
+  clienteNit?: string;
+  clienteNombre: string;
+  /** Opcional: callback cuando se completa la NC para limpiar el state del padre. */
+  onCompleted?: () => void;
+}
+
+interface PosTabProps {
+  ncContext?: NcContext;
+}
+
+export function PosTab({ ncContext }: PosTabProps = {}) {
   const productos = useDataStore(s => s.data.productos);
   const contribuyentes = useDataStore(s => s.data.contribuyentes);
   const patch = useDataStore(s => s.patch);
@@ -66,7 +79,7 @@ export function PosTab() {
   const [search, setSearch] = useState('');
   const [tipoFilter, setTipoFilter] = useState<TipoFilter>('todos');
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [tipoDte, setTipoDte] = useState<DteTipo>('fcf');
+  const [tipoDte, setTipoDte] = useState<DteTipo>(ncContext ? 'nc' : 'fcf');
   const [clienteId, setClienteId] = useState<string>('');
   const [consecutivo, setConsecutivo] = useState<string>('1');
   const [emitting, setEmitting] = useState(false);
@@ -75,6 +88,20 @@ export function PosTab() {
   const [serviceStatus, setServiceStatus] = useState<{ ok: boolean; mhEnv?: string } | null>(null);
   const [showClienteModal, setShowClienteModal] = useState(false);
   const [clienteForm, setClienteForm] = useState<ClienteForm>(emptyClienteForm);
+
+  // Cuando llega un ncContext (creando NC desde DTEs Emitidos), forzamos el
+  // tipo a NC y pre-seleccionamos el cliente original del CCF por NIT.
+  useEffect(() => {
+    if (!ncContext) return;
+    setTipoDte('nc');
+    if (ncContext.clienteNit) {
+      const cleanNit = ncContext.clienteNit.replace(/-/g, '');
+      const match = contribuyentes.find(
+        c => (c.nit ?? '').replace(/-/g, '') === cleanNit,
+      );
+      if (match) setClienteId(match.id);
+    }
+  }, [ncContext, contribuyentes]);
 
   const productosActivos = useMemo(
     () => productos.filter(p => p.activo),
@@ -221,6 +248,14 @@ export function PosTab() {
       setError({ message: 'FSE requiere un sujeto excluido seleccionado.' });
       return;
     }
+    if (tipoDte === 'nc' && !ncContext) {
+      setError({ message: 'NC requiere abrirse desde un CCF emitido (botón "Crear NC" en DTEs Emitidos).' });
+      return;
+    }
+    if (tipoDte === 'nc' && !cliente) {
+      setError({ message: 'NC requiere el cliente original del CCF.' });
+      return;
+    }
 
     setEmitting(true);
     setResult(null);
@@ -246,8 +281,13 @@ export function PosTab() {
           });
           break;
         case 'nc':
-          // NC requiere referenciar un CCF previo — UI dedicada en otra iteración
-          throw new Error('NC se emite desde la pestaña de un CCF existente (próximamente).');
+          data = buildNcData({
+            consecutivo: consecutivoNum,
+            lines: cart,
+            receptor: cliente!,
+            ncRef: ncContext!.ref,
+          });
+          break;
       }
 
       const res = await emitDte({ tipo: tipoDte, data });
@@ -255,15 +295,19 @@ export function PosTab() {
       setConsecutivo(String(consecutivoNum + 1));
 
       // Persistir en la tabla de ventas correspondiente para que aparezca en
-      // los anexos mensuales.
+      // los anexos mensuales y en la pestaña DTEs Emitidos.
       await persistVenta({
         tipo: tipoDte,
         cliente,
         cart,
         totals,
         emitResult: res,
+        documentoJws: res.documento,
+        ncRelacionada: tipoDte === 'nc' ? ncContext?.ref.ccfCodigo : undefined,
       });
       setCart([]);
+      // Si era NC, notifica al padre para limpiar el context
+      if (tipoDte === 'nc') ncContext?.onCompleted?.();
     } catch (e) {
       if (e instanceof DteServiceError) {
         const obs = (e.details?.failures as Array<{ message: string; path: string }> | undefined)
@@ -286,8 +330,10 @@ export function PosTab() {
     cart: CartLine[];
     totals: { subtotal: number; iva: number; total: number };
     emitResult: DteEmitSuccess;
+    documentoJws?: string;
+    ncRelacionada?: string;
   }): Promise<void> {
-    const { tipo, cliente, cart, totals, emitResult } = args;
+    const { tipo, cliente, cart, totals, emitResult, documentoJws, ncRelacionada } = args;
     const fecha = new Date().toISOString().slice(0, 10);
     const descripcion = cart.map(l => `${l.cantidad}× ${l.producto.nombre}`).join(' · ');
 
@@ -308,30 +354,37 @@ export function PosTab() {
           cliente: cliente?.nombre,
           subtotal: (totals.total - totals.iva).toFixed(2),
           iva: totals.iva.toFixed(2),
+          documentoJws,
         },
       };
       await patch(prev => ({
         ...prev,
         ventasConsumidor: [...prev.ventasConsumidor, venta],
       }));
-    } else if (tipo === 'ccf') {
+    } else if (tipo === 'ccf' || tipo === 'nc') {
       const venta: VentaContribuyente = {
         id: newId(),
         fecha,
         cliente: cliente!.nombre,
         nrc: cliente!.nrc,
-        descripcion,
+        descripcion: tipo === 'nc'
+          ? `NC: ${descripcion}`
+          : descripcion,
+        // NC: el monto representa CRÉDITO al cliente — se reflejará como
+        // negativo en los reportes mensuales si filtramos por tipoDocumento.
         gravado: totals.subtotal.toFixed(2),
         exento: '0.00',
         notas: '',
         metadata: {
           source: 'manual',
           claseDocumento: '4',
-          tipoDocumento: '03',
+          tipoDocumento: tipo === 'nc' ? '05' : '03',
           numeroDocumento: emitResult.codigoGeneracion,
           numeroControl: emitResult.numeroControl,
           selloRecibido: emitResult.selloRecibido ?? undefined,
           nit: cliente!.nit,
+          documentoJws,
+          ncRelacionadaCodigo: ncRelacionada,
         },
       };
       await patch(prev => ({
@@ -350,6 +403,32 @@ export function PosTab() {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 420px', gap: 'var(--s-5)' }}>
+      {ncContext && (
+        <div style={{
+          gridColumn: '1 / -1',
+          background: 'var(--brand-accent-50)',
+          border: '1px solid var(--brand-accent-300)',
+          borderRadius: 'var(--r-md)',
+          padding: 'var(--s-3) var(--s-4)',
+          fontSize: 'var(--text-sm)',
+          display: 'flex', alignItems: 'center', gap: 'var(--s-3)', justifyContent: 'space-between',
+        }}>
+          <div>
+            <strong>Creando Nota de Crédito</strong> sobre CCF{' '}
+            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{ncContext.ref.ccfCodigo.slice(0, 16)}…</code>
+            {' '}emitido a <strong>{ncContext.clienteNombre}</strong>
+          </div>
+          <button
+            onClick={() => ncContext.onCompleted?.()}
+            style={{
+              fontSize: 'var(--text-xs)', background: 'none', border: 'none',
+              color: 'var(--fg-3)', cursor: 'pointer', textDecoration: 'underline',
+            }}
+          >
+            Cancelar NC
+          </button>
+        </div>
+      )}
       {/* ───────── Catálogo ───────── */}
       <div>
         <div style={{ display: 'flex', gap: 'var(--s-2)', marginBottom: 'var(--s-4)', flexWrap: 'wrap' }}>
@@ -458,31 +537,46 @@ export function PosTab() {
         {/* Tipo de documento */}
         <div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)', marginBottom: 4 }}>Tipo de documento</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['fcf', 'ccf', 'fse'] as DteTipo[]).map(t => (
-              <button
-                key={t}
-                onClick={() => { setTipoDte(t); setResult(null); setError(null); }}
-                style={{
-                  flex: 1,
-                  padding: '8px 4px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 600,
-                  background: tipoDte === t ? 'var(--brand-primary-700)' : 'var(--surface-2)',
-                  color: tipoDte === t ? '#fff' : 'var(--fg-2)',
-                  border: '1px solid ' + (tipoDte === t ? 'var(--brand-primary-700)' : 'var(--border)'),
-                  borderRadius: 'var(--r-md)',
-                  cursor: 'pointer',
-                }}
-              >
-                {t.toUpperCase()}
-              </button>
-            ))}
-          </div>
+          {ncContext ? (
+            <div style={{
+              padding: '8px 12px',
+              background: 'var(--brand-accent-700)',
+              color: '#fff',
+              fontSize: 'var(--text-xs)',
+              fontWeight: 600,
+              borderRadius: 'var(--r-md)',
+              textAlign: 'center',
+            }}>
+              NC — Nota de Crédito
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 4 }}>
+              {(['fcf', 'ccf', 'fse'] as DteTipo[]).map(t => (
+                <button
+                  key={t}
+                  onClick={() => { setTipoDte(t); setResult(null); setError(null); }}
+                  style={{
+                    flex: 1,
+                    padding: '8px 4px',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 600,
+                    background: tipoDte === t ? 'var(--brand-primary-700)' : 'var(--surface-2)',
+                    color: tipoDte === t ? '#fff' : 'var(--fg-2)',
+                    border: '1px solid ' + (tipoDte === t ? 'var(--brand-primary-700)' : 'var(--border)'),
+                    borderRadius: 'var(--r-md)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)', marginTop: 4 }}>
             {tipoDte === 'fcf' && 'Factura Consumidor — IVA incluido en el precio'}
             {tipoDte === 'ccf' && 'Crédito Fiscal — IVA se suma al precio'}
             {tipoDte === 'fse' && 'Sujeto Excluido — sin IVA (compra a no contribuyente)'}
+            {tipoDte === 'nc' && 'Crédito al cliente — ajusta el CCF original'}
           </div>
         </div>
 
