@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.log
+firmador/temp/*.crt
+firmador/temp/.gitkeep
+.DS_Store

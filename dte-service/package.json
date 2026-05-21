@@ -1,0 +1,33 @@
+{
+  "name": "dte-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Microservicio de integración con el sistema DTE de Hacienda El Salvador",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.27.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "pino-pretty": "^11.0.0",
+    "tsx": "^4.10.5",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  }
+}

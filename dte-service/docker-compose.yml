@@ -1,0 +1,49 @@
+services:
+  firmador:
+    # Imagen oficial del MH publicada por svfe — el cert va en ./firmador/temp/
+    # con nombre `<NIT>.crt` (formato XML propietario del MH, no es PKCS#12).
+    image: svfe/svfe-api-firmador:v20230109
+    container_name: svfe-api-firmador
+    ports:
+      - "127.0.0.1:8113:8113"        # SOLO localhost — nunca exponer al exterior
+    volumes:
+      - ./firmador/temp:/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8113/firmardocumento/status || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  dte-service:
+    build: .
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 3000
+      MH_ENV: ${MH_ENV}
+      MH_NIT: ${MH_NIT}
+      MH_PASSWORD: ${MH_PASSWORD}
+      FIRMADOR_URL: http://firmador:8113
+      FIRMADOR_NIT: ${MH_NIT}
+      FIRMADOR_PASSWORD: ${FIRMADOR_PASSWORD}
+      EMISOR_NRC: ${EMISOR_NRC}
+      EMISOR_NOMBRE: ${EMISOR_NOMBRE}
+      EMISOR_COD_ACTIVIDAD: ${EMISOR_COD_ACTIVIDAD}
+      EMISOR_DESC_ACTIVIDAD: ${EMISOR_DESC_ACTIVIDAD}
+      EMISOR_NOMBRE_COMERCIAL: ${EMISOR_NOMBRE_COMERCIAL}
+      EMISOR_TIPO_ESTABLECIMIENTO: ${EMISOR_TIPO_ESTABLECIMIENTO}
+      EMISOR_DEPARTAMENTO: ${EMISOR_DEPARTAMENTO}
+      EMISOR_MUNICIPIO: ${EMISOR_MUNICIPIO}
+      EMISOR_COMPLEMENTO: ${EMISOR_COMPLEMENTO}
+      EMISOR_TELEFONO: ${EMISOR_TELEFONO}
+      EMISOR_EMAIL: ${EMISOR_EMAIL}
+      PUNTO_VENTA_ESTABLECIMIENTO: ${PUNTO_VENTA_ESTABLECIMIENTO}
+      PUNTO_VENTA_PUNTO: ${PUNTO_VENTA_PUNTO}
+    ports:
+      - "127.0.0.1:3000:3000"        # consumido por el ERP, no público
+    depends_on:
+      firmador:
+        condition: service_started
+    restart: unless-stopped

@@ -1,0 +1,322 @@
+/* ============================================================
+   ABX Pyme — Design Tokens
+   Colors, type, spacing, radii, shadows, motion
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ---------- BRAND ---------- */
+  --brand-primary:        #0F766E;  /* Teal 700 */
+  --brand-primary-50:     #F0FDFA;
+  --brand-primary-100:    #CCFBF1;
+  --brand-primary-200:    #99F6E4;
+  --brand-primary-300:    #5EEAD4;
+  --brand-primary-400:    #2DD4BF;
+  --brand-primary-500:    #14B8A6;
+  --brand-primary-600:    #0D9488;
+  --brand-primary-700:    #0F766E;
+  --brand-primary-800:    #115E59;
+  --brand-primary-900:    #134E4A;
+  --brand-primary-950:    #042F2E;
+
+  --brand-accent:         #F59E0B;  /* Amber 500 */
+  --brand-accent-50:      #FFFBEB;
+  --brand-accent-100:     #FEF3C7;
+  --brand-accent-500:     #F59E0B;
+  --brand-accent-600:     #D97706;
+  --brand-accent-700:     #B45309;
+
+  /* ---------- NEUTRALS (Slate) ---------- */
+  --slate-0:    #FFFFFF;
+  --slate-50:   #F8FAFC;
+  --slate-100:  #F1F5F9;
+  --slate-200:  #E2E8F0;
+  --slate-300:  #CBD5E1;
+  --slate-400:  #94A3B8;
+  --slate-500:  #64748B;
+  --slate-600:  #475569;
+  --slate-700:  #334155;
+  --slate-800:  #1E293B;
+  --slate-900:  #0F172A;
+  --slate-950:  #020617;
+
+  /* ---------- SEMANTIC ---------- */
+  --success:        #16A34A;
+  --success-bg:     #F0FDF4;
+  --success-border: #BBF7D0;
+  --success-text:   #15803D;
+
+  --warning:        #F59E0B;
+  --warning-bg:     #FFFBEB;
+  --warning-border: #FDE68A;
+  --warning-text:   #B45309;
+
+  --danger:         #DC2626;
+  --danger-bg:      #FEF2F2;
+  --danger-border:  #FECACA;
+  --danger-text:    #B91C1C;
+
+  --info:           #0284C7;
+  --info-bg:        #F0F9FF;
+  --info-border:    #BAE6FD;
+  --info-text:      #0369A1;
+
+  /* ---------- DTE STATUS COLORS ---------- */
+  --dte-aceptado:    var(--success);
+  --dte-procesando:  var(--info);
+  --dte-rechazado:   var(--danger);
+  --dte-invalidado:  var(--slate-500);
+  --dte-contingencia: var(--warning);
+
+  /* ---------- SURFACES (light theme) ---------- */
+  --bg:             var(--slate-50);
+  --bg-elevated:    var(--slate-0);
+  --surface-1:      var(--slate-0);
+  --surface-2:      var(--slate-50);
+  --surface-3:      var(--slate-100);
+  --surface-hover:  var(--slate-100);
+
+  /* ---------- FOREGROUND ---------- */
+  --fg-1:  var(--slate-900);  /* primary text */
+  --fg-2:  var(--slate-700);  /* secondary text */
+  --fg-3:  var(--slate-500);  /* tertiary, captions */
+  --fg-4:  var(--slate-400);  /* placeholder, disabled */
+  --fg-on-primary: #FFFFFF;
+  --fg-link:       var(--brand-primary-700);
+
+  /* ---------- BORDERS ---------- */
+  --border:         var(--slate-200);
+  --border-strong:  var(--slate-300);
+  --border-focus:   var(--brand-primary-600);
+  --ring-focus:     0 0 0 3px rgba(15,118,110,0.20);
+
+  /* ---------- TYPOGRAPHY ---------- */
+  --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: 'Inter', -apple-system, sans-serif;
+
+  --text-xs:   12px;
+  --text-sm:   13px;
+  --text-base: 15px;
+  --text-md:   16px;
+  --text-lg:   18px;
+  --text-xl:   20px;
+  --text-2xl:  24px;
+  --text-3xl:  30px;
+  --text-4xl:  36px;
+  --text-5xl:  44px;
+  --text-6xl:  56px;
+
+  --leading-tight:  1.2;
+  --leading-snug:   1.4;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --tracking-display: -0.02em;
+  --tracking-tight:   -0.01em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.02em;
+
+  /* ---------- SPACING (4px scale) ---------- */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  20px;
+  --s-6:  24px;
+  --s-7:  32px;
+  --s-8:  40px;
+  --s-9:  48px;
+  --s-10: 64px;
+  --s-11: 80px;
+  --s-12: 96px;
+
+  /* ---------- RADII ---------- */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:   8px;
+  --r-lg:   12px;
+  --r-xl:   16px;
+  --r-2xl:  24px;
+  --r-pill: 999px;
+
+  /* ---------- SHADOWS ---------- */
+  --shadow-1: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+  --shadow-2: 0 4px 12px rgba(15,23,42,0.08);
+  --shadow-3: 0 16px 32px -8px rgba(15,23,42,0.16);
+  --shadow-inner: inset 0 1px 2px rgba(15,23,42,0.04);
+
+  /* ---------- MOTION ---------- */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --d-fast:   120ms;
+  --d-base:   200ms;
+  --d-slow:   320ms;
+
+  /* ---------- LAYOUT ---------- */
+  --topbar-h:      64px;
+  --sidebar-w:     248px;
+  --sidebar-w-collapsed: 64px;
+  --row-h:         44px;
+  --container-max: 1440px;
+}
+
+/* ============================================================
+   DARK THEME
+   ============================================================ */
+[data-theme="dark"] {
+  --bg:            #0B1220;
+  --bg-elevated:   #111827;
+  --surface-1:     #111827;
+  --surface-2:     #1F2937;
+  --surface-3:     #2A3441;
+  --surface-hover: #1F2937;
+
+  --fg-1: #F8FAFC;
+  --fg-2: #CBD5E1;
+  --fg-3: #94A3B8;
+  --fg-4: #64748B;
+  --fg-link: var(--brand-primary-400);
+
+  --border:        #1F2937;
+  --border-strong: #334155;
+  --ring-focus:    0 0 0 3px rgba(45,212,191,0.25);
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-2: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-3: 0 16px 32px -8px rgba(0,0,0,0.6);
+
+  --success-bg:     rgba(22,163,74,0.12);
+  --success-border: rgba(22,163,74,0.30);
+  --warning-bg:     rgba(245,158,11,0.12);
+  --warning-border: rgba(245,158,11,0.30);
+  --danger-bg:      rgba(220,38,38,0.12);
+  --danger-border:  rgba(220,38,38,0.30);
+  --info-bg:        rgba(2,132,199,0.12);
+  --info-border:    rgba(2,132,199,0.30);
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--fg-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================================
+   SEMANTIC TYPOGRAPHY
+   ============================================================ */
+.h1, h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-5xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg-1);
+  margin: 0;
+}
+.h-display, .display {
+  font-family: var(--font-display);
+  font-size: var(--text-6xl);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: var(--tracking-display);
+}
+.h2, h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-4xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+  margin: 0;
+}
+.h3, h3 {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+  margin: 0;
+}
+.h4, h4 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--leading-snug);
+  color: var(--fg-1);
+  margin: 0;
+}
+.h5, h5 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-snug);
+  color: var(--fg-1);
+  margin: 0;
+}
+.body, p {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--fg-2);
+  margin: 0;
+}
+.body-lg {
+  font-size: var(--text-lg);
+  line-height: var(--leading-relaxed);
+  color: var(--fg-2);
+}
+.body-sm, .small {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--fg-2);
+}
+.caption {
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--fg-3);
+  font-weight: 500;
+}
+.label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-2);
+}
+.eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.mono, code, kbd, pre {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  font-feature-settings: "tnum", "ss01";
+}
+.numeric, .num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ============================================================
+   UTILITY
+   ============================================================ */
+.text-fg-1 { color: var(--fg-1); }
+.text-fg-2 { color: var(--fg-2); }
+.text-fg-3 { color: var(--fg-3); }
+.text-primary { color: var(--brand-primary); }
+.text-success { color: var(--success-text); }
+.text-danger  { color: var(--danger-text); }
+.text-warning { color: var(--warning-text); }
+.text-info    { color: var(--info-text); }
