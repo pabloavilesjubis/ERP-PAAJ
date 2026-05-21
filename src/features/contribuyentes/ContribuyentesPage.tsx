@@ -6,12 +6,18 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import {
+  ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, findDepartamento, findMunicipio,
+  getMunicipiosFor,
+} from '@/lib/catalogos/mh';
 import { newId } from '@/lib/utils/format';
 import { useDataStore } from '@/stores/data.store';
 import type { Contribuyente, ContribuyenteTipo } from '@/types/domain';
 
 const empty: Omit<Contribuyente, 'id'> = {
-  nombre: '', nit: '', dui: '', nrc: '', giro: '', telefono: '', email: '', direccion: '', tipo: 'Cliente',
+  nombre: '', nit: '', dui: '', nrc: '', giro: '', telefono: '', email: '', direccion: '',
+  departamento: '06', municipio: '14', codActividad: '',
+  tipo: 'Cliente',
 };
 
 type Tab = 'all' | ContribuyenteTipo;
@@ -95,7 +101,22 @@ export function ContribuyentesPage() {
                 <div className="contrib-field">NIT <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{c.nit}</span></div>
                 {c.dui && <div className="contrib-field">DUI <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{c.dui}</span></div>}
                 <div className="contrib-field">NRC <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{c.nrc}</span></div>
-                {c.giro && <div className="contrib-field">Giro <span>{c.giro}</span></div>}
+                {(c.codActividad || c.giro) && (
+                  <div className="contrib-field">
+                    Actividad <span>
+                      {c.codActividad && <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', marginRight: 4 }}>{c.codActividad}</code>}
+                      {c.giro}
+                    </span>
+                  </div>
+                )}
+                {c.departamento && c.municipio && (
+                  <div className="contrib-field">
+                    Ubicación <span>
+                      {findMunicipio(c.departamento, c.municipio)?.nombre ?? c.municipio},{' '}
+                      {findDepartamento(c.departamento)?.nombre ?? c.departamento}
+                    </span>
+                  </div>
+                )}
                 {c.telefono && <div className="contrib-field">Tel <span>{c.telefono}</span></div>}
                 {c.email && <div className="contrib-field">Email <span style={{ wordBreak: 'break-all' }}>{c.email}</span></div>}
                 {c.direccion && <div className="contrib-field">Dir. <span>{c.direccion}</span></div>}
@@ -125,11 +146,76 @@ export function ContribuyentesPage() {
                 <option>Cliente</option><option>Proveedor</option><option>Ambos</option>
               </Select>
             </Field>
-            <Field label="Giro"><Input type="text" placeholder="Actividad económica" value={form.giro ?? ''} onChange={e => setForm(p => ({ ...p, giro: e.target.value }))} /></Field>
+            <Field label="Actividad económica (CAT-019 del MH)" fullWidth>
+              <Select
+                value={form.codActividad ?? ''}
+                onChange={e => {
+                  const codigo = e.target.value;
+                  const cat = ACTIVIDADES_ECONOMICAS.find(a => a.codigo === codigo);
+                  setForm(p => ({
+                    ...p,
+                    codActividad: codigo,
+                    giro: cat ? cat.nombre : (codigo === 'otro' ? (p.giro ?? '') : ''),
+                  }));
+                }}
+              >
+                <option value="">— Selecciona una actividad —</option>
+                {ACTIVIDADES_ECONOMICAS.map(a => (
+                  <option key={a.codigo} value={a.codigo}>{a.codigo} — {a.nombre}</option>
+                ))}
+                <option value="otro">Otra (ingresar manualmente)</option>
+              </Select>
+            </Field>
+            {form.codActividad === 'otro' && (
+              <>
+                <Field label="Código actividad (2-6 dígitos)">
+                  <Input
+                    type="text"
+                    placeholder="46900"
+                    value={form.codActividad === 'otro' ? '' : (form.codActividad ?? '')}
+                    onChange={e => setForm(p => ({ ...p, codActividad: e.target.value.replace(/\D/g, '').slice(0, 6) || 'otro' }))}
+                  />
+                </Field>
+                <Field label="Descripción">
+                  <Input type="text" placeholder="Mi actividad" value={form.giro ?? ''} onChange={e => setForm(p => ({ ...p, giro: e.target.value }))} />
+                </Field>
+              </>
+            )}
+            <Field label="Departamento (CAT-012)">
+              <Select
+                value={form.departamento ?? ''}
+                onChange={e => {
+                  const nuevoDept = e.target.value;
+                  const munis = getMunicipiosFor(nuevoDept);
+                  setForm(p => ({
+                    ...p,
+                    departamento: nuevoDept,
+                    municipio: munis[0]?.codigo ?? '',
+                  }));
+                }}
+              >
+                <option value="">— Selecciona —</option>
+                {DEPARTAMENTOS.map(d => (
+                  <option key={d.codigo} value={d.codigo}>{d.codigo} — {d.nombre}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Municipio (CAT-013)">
+              <Select
+                value={form.municipio ?? ''}
+                onChange={e => setForm(p => ({ ...p, municipio: e.target.value }))}
+                disabled={!form.departamento}
+              >
+                <option value="">— Selecciona depto. primero —</option>
+                {getMunicipiosFor(form.departamento ?? '').map(m => (
+                  <option key={m.codigo} value={m.codigo}>{m.codigo} — {m.nombre}</option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Teléfono"><Input type="text" placeholder="2234-5678" value={form.telefono ?? ''} onChange={e => setForm(p => ({ ...p, telefono: e.target.value }))} /></Field>
             <Field label="Email"><Input type="email" placeholder="correo@empresa.com" value={form.email ?? ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></Field>
-            <Field label="Dirección" fullWidth>
-              <Input type="text" placeholder="Dirección fiscal" value={form.direccion ?? ''} onChange={e => setForm(p => ({ ...p, direccion: e.target.value }))} />
+            <Field label="Dirección (calle, colonia, número)" fullWidth>
+              <Input type="text" placeholder="Col. Escalón, Calle Los Almendros #15" value={form.direccion ?? ''} onChange={e => setForm(p => ({ ...p, direccion: e.target.value }))} />
             </Field>
           </div>
         </Modal>

@@ -25,8 +25,17 @@ export interface AnnulResult {
   raw: AnulacionResponse;
 }
 
-/** Envía el evento de anulación al MH. Mismas reglas de auth/retry que submit. */
+/** Envía el evento de anulación al MH. Mismas reglas de auth/retry que submit.
+ *  En `MH_ENV=mock` devuelve respuesta sintética sin tocar el MH. */
 export async function annulDte(args: AnnulArgs): Promise<AnnulResult> {
+  if (args.cfg.MH_ENV === 'mock') {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const sello = Array.from({ length: 40 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return {
+      selloRecibido: sello,
+      raw: { estado: 'PROCESADO', selloRecibido: sello, descripcionMsg: 'MOCK MODE — anulación simulada' },
+    };
+  }
   const url = `${MH_BASE[args.cfg.MH_ENV]}/fesv/anulardte`;
   const body = {
     ambiente: AMBIENTE[args.cfg.MH_ENV],

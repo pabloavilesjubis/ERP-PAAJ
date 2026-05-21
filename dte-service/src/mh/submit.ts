@@ -35,8 +35,13 @@ export interface SubmitResult {
 }
 
 /** Envía un DTE firmado al endpoint de recepción del MH. Refresca el token y
- *  reintenta una vez si recibe 401. Lanza `MhRejectedError` si el MH rechaza. */
+ *  reintenta una vez si recibe 401. Lanza `MhRejectedError` si el MH rechaza.
+ *  En `MH_ENV=mock` devuelve una respuesta sintética (sello + estado PROCESADO)
+ *  sin llamar al MH — útil para flujo end-to-end sin cert. */
 export async function submitDte(args: SubmitArgs): Promise<SubmitResult> {
+  if (args.cfg.MH_ENV === 'mock') {
+    return mockSubmit(args);
+  }
   const url = `${MH_BASE[args.cfg.MH_ENV]}/fesv/recepciondte`;
   const body = {
     ambiente: AMBIENTE[args.cfg.MH_ENV],
@@ -72,4 +77,35 @@ export async function submitDte(args: SubmitArgs): Promise<SubmitResult> {
     selloRecibido: res.body.selloRecibido,
     raw: res.body,
   };
+}
+
+/** Genera un sello fake con el formato MH: 40 chars uppercase alfanuméricos. */
+function fakeSello(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  return Array.from({ length: 40 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+/** Respuesta sintética para mock mode — replica el shape del MH. */
+async function mockSubmit(args: SubmitArgs): Promise<SubmitResult> {
+  const now = new Date();
+  const fh = `${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}/${now.getFullYear()} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+  const sello = fakeSello();
+  const raw: RecepcionResponse = {
+    version: 2,
+    ambiente: '00',
+    versionApp: 2,
+    estado: 'PROCESADO',
+    codigoGeneracion: args.codigoGeneracion,
+    selloRecibido: sello,
+    fhProcesamiento: fh,
+    clasificaMsg: '11',
+    codigoMsg: '001',
+    descripcionMsg: 'MOCK MODE — no se envió al MH real',
+    observaciones: null,
+  };
+  return { estado: 'PROCESADO', selloRecibido: sello, raw };
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
 }

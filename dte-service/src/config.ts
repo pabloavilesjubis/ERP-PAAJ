@@ -5,7 +5,7 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   PORT: z.coerce.number().int().positive().default(3000),
 
-  MH_ENV: z.enum(['sandbox', 'production']),
+  MH_ENV: z.enum(['sandbox', 'production', 'mock']),
   MH_NIT: z.string().regex(/^\d{14}$/, 'MH_NIT debe ser 14 dígitos sin guiones'),
   MH_PASSWORD: z.string().min(1),
 
@@ -44,9 +44,11 @@ export function loadConfig(): Config {
 export const MH_BASE: Record<Config['MH_ENV'], string> = {
   sandbox: 'https://apitest.dtes.mh.gob.sv',
   production: 'https://api.dtes.mh.gob.sv',
+  mock: 'http://mock.local',     // nunca se llama en mock mode
 };
 
 export const AMBIENTE: Record<Config['MH_ENV'], '00' | '01'> = {
   sandbox: '00',
   production: '01',
+  mock: '00',                    // mock se comporta como sandbox para el payload
 };

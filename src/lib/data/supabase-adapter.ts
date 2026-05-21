@@ -138,6 +138,12 @@ export class SupabaseAdapter implements DataAdapter {
       ['reportes_generados', new Set(data.reportesGenerados.map(r => r.id))],
     ];
 
+    // Umbral de borrado masivo: si la memoria está vacía para una tabla pero
+    // la BD tiene más de esto, REFUSA. Es la segunda línea de defensa contra
+    // el incidente del 2026-05-02 donde una carga fallida + interacción
+    // posterior borró todas las tablas reales.
+    const BULK_DELETE_THRESHOLD = 3;
+
     for (const [table, currentIds] of tablesAndIds) {
       const { data: dbRows, error: errSel } = await supabase
         .from(table).select('id').eq('company_id', companyId);
@@ -148,6 +154,20 @@ export class SupabaseAdapter implements DataAdapter {
       const toDelete = (dbRows ?? [])
         .map(r => (r as { id: string }).id)
         .filter(id => !currentIds.has(id));
+
+      // SAFETY: refusa wipe masivo cuando memoria está vacía. Para borrar
+      // > 3 filas con memoria vacía, usar SQL directo o eliminar uno por uno.
+      if (currentIds.size === 0 && toDelete.length > BULK_DELETE_THRESHOLD) {
+        console.error(
+          `[ERP] save ABORTADO: borraría ${toDelete.length} filas de ${table} con memoria vacía. ` +
+          `Probable bug — revisa logs de load. Si quieres borrar todo, hazlo con SQL.`,
+        );
+        throw new Error(
+          `Guardado abortado por seguridad: borraría ${toDelete.length} filas de ${table} con memoria vacía. ` +
+          `Esto suele ser un bug. Revisa logs y recarga la página.`,
+        );
+      }
+
       if (toDelete.length > 0) {
         const { error: errDel } = await supabase
           .from(table).delete().in('id', toDelete);
