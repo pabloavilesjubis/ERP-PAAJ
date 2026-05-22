@@ -200,6 +200,24 @@ export interface Producto {
   activo: boolean;
 }
 
+/* ──────────────────────── Correlativos DTE ──────────────────────── */
+
+/**
+ * Trackea el último consecutivo emitido EXITOSAMENTE al MH por tipo de DTE.
+ * El siguiente envío usa `ultimoConsecutivo + 1`. Sin esto, dos emisiones
+ * podrían usar el mismo número y MH rechazaría duplicados.
+ *
+ * Convención: ultimoConsecutivo = 0 significa "nunca se ha emitido" → próximo = 1.
+ * Asume un solo (establecimiento, puntoVenta) por empresa (caso típico PyME).
+ */
+export type TipoDteCode = '01' | '03' | '05' | '14' | '06' | '11';
+
+export interface CorrelativoDte {
+  id: string;
+  tipoDte: TipoDteCode;
+  ultimoConsecutivo: number;
+}
+
 export type ReporteTipo =
   | 'anexo_consumidor_final'
   | 'anexo_compras'
@@ -224,6 +242,7 @@ export interface AppData {
   compras: Compra[];
   contribuyentes: Contribuyente[];
   productos: Producto[];
+  correlativosDte: CorrelativoDte[];
   reportesGenerados: ReporteGenerado[];
 }
 

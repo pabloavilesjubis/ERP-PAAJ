@@ -28,6 +28,7 @@ const empty: AppData = {
   compras: [],
   contribuyentes: [],
   productos: [],
+  correlativosDte: [],
   reportesGenerados: [],
 };
 

@@ -11,6 +11,12 @@ import {
   ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, getMunicipiosFor,
 } from '@/lib/catalogos/mh';
 import {
+  bumpCorrelativo, getProximoConsecutivo, tipoDteToCodigo,
+} from '@/lib/dte/correlativos';
+import {
+  downloadDtePdf, downloadDteTicket, extractPdfData, type PdfData,
+} from '@/lib/dte/pdf';
+import {
   buildCcfData, buildFcfData, buildFseData, buildNcData, calcCartTotals,
   type CartLine, type NcReference,
 } from '@/lib/dte/payload';
@@ -74,6 +80,7 @@ interface PosTabProps {
 export function PosTab({ ncContext }: PosTabProps = {}) {
   const productos = useDataStore(s => s.data.productos);
   const contribuyentes = useDataStore(s => s.data.contribuyentes);
+  const correlativosDte = useDataStore(s => s.data.correlativosDte);
   const patch = useDataStore(s => s.patch);
 
   const [search, setSearch] = useState('');
@@ -81,13 +88,24 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [tipoDte, setTipoDte] = useState<DteTipo>(ncContext ? 'nc' : 'fcf');
   const [clienteId, setClienteId] = useState<string>('');
-  const [consecutivo, setConsecutivo] = useState<string>('1');
+  // Consecutivo auto-driven: viene del store según el tipo activo. El usuario
+  // puede override si necesita (caso: re-emitir tras anulación), pero por
+  // default sigue la secuencia para no chocar con duplicados en el MH.
+  const proximoAuto = getProximoConsecutivo(correlativosDte, tipoDteToCodigo(tipoDte));
+  const [consecutivoOverride, setConsecutivoOverride] = useState<string>('');
+  const consecutivo = consecutivoOverride !== '' ? consecutivoOverride : String(proximoAuto);
   const [emitting, setEmitting] = useState(false);
   const [result, setResult] = useState<DteEmitSuccess | null>(null);
   const [error, setError] = useState<{ message: string; details?: string[] } | null>(null);
   const [serviceStatus, setServiceStatus] = useState<{ ok: boolean; mhEnv?: string } | null>(null);
   const [showClienteModal, setShowClienteModal] = useState(false);
   const [clienteForm, setClienteForm] = useState<ClienteForm>(emptyClienteForm);
+  // Modal automático tras emisión exitosa — para imprimir ticket / enviar correo
+  const [postEmit, setPostEmit] = useState<{
+    pdfData: PdfData;
+    receptorEmail: string | null;
+    receptorNombre: string;
+  } | null>(null);
 
   // Cuando llega un ncContext (creando NC desde DTEs Emitidos), forzamos el
   // tipo a NC y pre-seleccionamos el cliente original del CCF por NIT.
@@ -292,10 +310,16 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
 
       const res = await emitDte({ tipo: tipoDte, data });
       setResult(res);
-      setConsecutivo(String(consecutivoNum + 1));
+      // Reset del override — el próximo emit volverá a usar el auto del store
+      // (que ya estará incrementado por el bump abajo).
+      setConsecutivoOverride('');
 
       // Persistir en la tabla de ventas correspondiente para que aparezca en
       // los anexos mensuales y en la pestaña DTEs Emitidos.
+      // Y actualizar el correlativo: ahora ultimoConsecutivo = el que acabamos
+      // de usar. Crítico: sin esto, el siguiente emit usaría el mismo número
+      // y el MH lo rechazaría como duplicado.
+      const codigoTipo = tipoDteToCodigo(tipoDte);
       await persistVenta({
         tipo: tipoDte,
         cliente,
@@ -305,7 +329,33 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
         documentoJws: res.documento,
         ncRelacionada: tipoDte === 'nc' ? ncContext?.ref.ccfCodigo : undefined,
       });
+      await patch(prev => ({
+        ...prev,
+        correlativosDte: bumpCorrelativo(prev.correlativosDte, codigoTipo, consecutivoNum),
+      }));
       setCart([]);
+
+      // Dispara modal post-emisión: ofrece imprimir ticket y enviar correo
+      // sin tener que ir hasta DTEs Emitidos. Pre-llena con el JWS recién
+      // firmado — extractPdfData saca emisor/items/totales del payload.
+      const fecha = new Date().toISOString().slice(0, 10);
+      const pdfData = extractPdfData({
+        tipo: tipoDte,
+        codigoGeneracion: res.codigoGeneracion,
+        numeroControl: res.numeroControl,
+        selloRecibido: res.selloRecibido,
+        fecha,
+        cliente: cliente?.nombre ?? 'Consumidor anónimo',
+        total: totals.total,
+        documentoJws: res.documento,
+        anulado: false,
+      });
+      setPostEmit({
+        pdfData,
+        receptorEmail: cliente?.email ?? null,
+        receptorNombre: cliente?.nombre ?? 'Cliente',
+      });
+
       // Si era NC, notifica al padre para limpiar el context
       if (tipoDte === 'nc') ncContext?.onCompleted?.();
     } catch (e) {
@@ -709,16 +759,33 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
           </div>
         </div>
 
-        {/* Consecutivo */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>
-          <span>Consecutivo:</span>
-          <input
-            type="number"
-            min={1}
-            value={consecutivo}
-            onChange={e => setConsecutivo(e.target.value)}
-            style={{ width: 90, padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 4 }}
-          />
+        {/* Consecutivo auto-driven desde store, override opcional */}
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 4,
+          fontSize: 'var(--text-xs)', color: 'var(--fg-3)',
+          padding: 'var(--s-2)', background: 'var(--surface-2)',
+          borderRadius: 'var(--r-md)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Próximo consecutivo ({tipoDte.toUpperCase()})</span>
+            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
+              {String(proximoAuto).padStart(15, '0')}
+            </code>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 10 }}>Override (vacío = auto):</span>
+            <input
+              type="number"
+              min={1}
+              placeholder={String(proximoAuto)}
+              value={consecutivoOverride}
+              onChange={e => setConsecutivoOverride(e.target.value)}
+              style={{ flex: 1, padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 10 }}
+            />
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--fg-4)' }}>
+            Configurar el último emitido en pestaña <strong>Correlativos</strong>.
+          </div>
         </div>
 
         <Button
@@ -783,6 +850,15 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
         )}
       </div>
 
+      {postEmit && (
+        <PostEmitModal
+          pdfData={postEmit.pdfData}
+          receptorEmail={postEmit.receptorEmail}
+          receptorNombre={postEmit.receptorNombre}
+          emisorNombre={postEmit.pdfData.emisor.nombreComercial || postEmit.pdfData.emisor.nombre}
+          onClose={() => setPostEmit(null)}
+        />
+      )}
       {showClienteModal && (
         <Modal
           title="Agregar cliente"
@@ -1029,6 +1105,118 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
           )}
         </Modal>
       )}
+    </div>
+  );
+}
+
+/* ─────────────────────── Modal Post-Emit ─────────────────────── */
+
+interface PostEmitModalProps {
+  pdfData: PdfData;
+  receptorEmail: string | null;
+  receptorNombre: string;
+  emisorNombre: string;
+  onClose: () => void;
+}
+
+function PostEmitModal({ pdfData, receptorEmail, receptorNombre, emisorNombre, onClose }: PostEmitModalProps) {
+  async function imprimirTicket(): Promise<void> {
+    await downloadDteTicket(pdfData, { mode: 'print' });
+  }
+
+  async function enviarEImprimir(): Promise<void> {
+    if (!receptorEmail) return;
+    // 1) Descarga el PDF Carta para que el usuario lo adjunte al correo manualmente
+    //    (mailto: no soporta attachments — limitación del protocolo).
+    await downloadDtePdf(pdfData);
+    // 2) Abre el cliente de correo con asunto + cuerpo pre-llenados, incluyendo
+    //    la URL de consulta pública del MH para que el cliente pueda verificar.
+    const consultaUrl = `https://admin.factura.gob.sv/consultaPublica?ambiente=${pdfData.ambiente}&codGen=${pdfData.codigoGeneracion}&fechaEmi=${pdfData.fecha}`;
+    const subject = `Su Factura Electrónica · ${pdfData.numeroControl}`;
+    const body = [
+      `Estimado/a ${receptorNombre},`,
+      '',
+      `Adjuntamos su Documento Tributario Electrónico (DTE) emitido por ${emisorNombre}.`,
+      '',
+      `Total: $${pdfData.totales.total.toFixed(2)}`,
+      `Número de Control: ${pdfData.numeroControl}`,
+      `Código de Generación: ${pdfData.codigoGeneracion}`,
+      `Sello recibido por MH: ${pdfData.selloRecibido ?? '(pendiente)'}`,
+      '',
+      `Puede verificar la autenticidad de este DTE directamente en el portal del Ministerio de Hacienda:`,
+      consultaUrl,
+      '',
+      `El PDF de la factura se descargó en su navegador — por favor adjúntelo a este correo antes de enviar.`,
+      '',
+      `Gracias por su preferencia.`,
+      '',
+      `— ${emisorNombre}`,
+    ].join('\n');
+    const mailto = `mailto:${receptorEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+    // 3) Imprime el ticket térmico
+    await downloadDteTicket(pdfData, { mode: 'print' });
+  }
+
+  return (
+    <Modal title="DTE emitido exitosamente" onClose={onClose}>
+      <div style={{
+        background: 'var(--success-bg, #e6f7e9)',
+        border: '1px solid var(--success-border, #28a745)',
+        borderRadius: 'var(--r-md)',
+        padding: 'var(--s-3) var(--s-4)',
+        marginBottom: 'var(--s-4)',
+        display: 'flex', alignItems: 'center', gap: 'var(--s-3)',
+      }}>
+        <Icon name="check" size={20} style={{ color: 'var(--success-text)' }} />
+        <div style={{ fontSize: 'var(--text-sm)' }}>
+          <strong>PROCESADO</strong> por el MH.
+          <span style={{ color: 'var(--fg-3)', marginLeft: 6 }}>
+            Sello {pdfData.selloRecibido?.slice(0, 16)}…
+          </span>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 'var(--text-sm)', marginBottom: 'var(--s-4)', display: 'grid', gap: 6 }}>
+        <PostEmitRow k="Tipo" v={pdfData.tipo.toUpperCase()} />
+        <PostEmitRow k="Núm. Control" v={pdfData.numeroControl} mono />
+        <PostEmitRow k="Receptor" v={receptorNombre} />
+        <PostEmitRow k="Total" v={`$${pdfData.totales.total.toFixed(2)}`} strong />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
+        <Button onClick={imprimirTicket} leading={<Icon name="receipt" size={15} />}>
+          Imprimir Ticket
+        </Button>
+        <Button
+          onClick={enviarEImprimir}
+          disabled={!receptorEmail}
+          variant="secondary"
+          leading={<Icon name="upload" size={15} />}
+          title={receptorEmail ?? 'El cliente no tiene correo registrado'}
+        >
+          {receptorEmail ? `Enviar a ${receptorEmail} e Imprimir` : 'Enviar e Imprimir (sin correo)'}
+        </Button>
+      </div>
+
+      {!receptorEmail && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)', marginTop: 'var(--s-3)', textAlign: 'center' }}>
+          Para enviar por correo, agrega el email al cliente en Contribuyentes.
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function PostEmitRow({ k, v, mono, strong }: { k: string; v: string; mono?: boolean; strong?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+      <span style={{ color: 'var(--fg-3)' }}>{k}</span>
+      <span style={{
+        fontFamily: mono ? 'var(--font-mono)' : undefined,
+        fontWeight: strong ? 700 : 400,
+        fontSize: mono ? 11 : undefined,
+      }}>{v}</span>
     </div>
   );
 }

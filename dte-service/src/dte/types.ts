@@ -358,8 +358,11 @@ export interface AnulacionEvento {
     tipoDocumento: string;
     numDocumento: string;
     nombre: string;
-    telefono: string | null;
-    correo: string | null;
+    // El schema del MH NO acepta null para telefono/correo en `documento`:
+    // o se incluye como string válido, o se omite el campo. Por eso son
+    // opcionales aquí — el builder los omite cuando no hay valor.
+    telefono?: string;
+    correo?: string;
   };
   motivo: {
     tipoAnulacion: TipoAnulacion;

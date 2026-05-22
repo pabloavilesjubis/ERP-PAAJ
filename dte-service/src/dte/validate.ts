@@ -25,6 +25,13 @@ const ajv = new Ajv({
   allErrors: true,           // reporta TODOS los errores, no sólo el primero
   strict: false,             // los schemas del MH usan formats no estándar (ej. integer mín/máx)
   allowUnionTypes: true,
+  // multipleOfPrecision: tolera la imprecisión de IEEE 754 al chequear `multipleOf`.
+  // AJV calcula `|data/divisor - round(data/divisor)| > 1e-${prec}`. Para schemas
+  // con divisores chicos (1e-8 en ivaItem), la división amplifica el error de FP
+  // a magnitudes ~1e-8, así que precisión 8 falla en el borde. Usamos 4 (1e-4)
+  // que sigue siendo 100x más fino que el centavo — el MH no usa floats, sus
+  // checks son sobre el JSON serializado como decimal exacto.
+  multipleOfPrecision: 4,
 });
 addFormats(ajv);
 

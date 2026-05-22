@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { displayDate, fmt, num } from '@/lib/utils/format';
 import { useDataStore } from '@/stores/data.store';
 import { annulDte, DteServiceError } from '@/lib/dte/client';
+import { downloadDtePdf, downloadDteTicket, extractPdfData } from '@/lib/dte/pdf';
 import type { VentaConsumidor, VentaContribuyente } from '@/types/domain';
 
 type TipoDte = 'fcf' | 'ccf';
@@ -105,6 +106,28 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
       return true;
     });
   }, [dtes, filterTipo, filterEstado, search]);
+
+  function pdfDataFromDte(dte: DteEmitido) {
+    return extractPdfData({
+      tipo: dte.tipo,
+      codigoGeneracion: dte.codigoGeneracion,
+      numeroControl: dte.numeroControl,
+      selloRecibido: dte.selloRecibido,
+      fecha: dte.fecha,
+      cliente: dte.cliente,
+      total: dte.total,
+      documentoJws: dte.documentoJws,
+      anulado: dte.anulado,
+    });
+  }
+
+  async function downloadPdf(dte: DteEmitido): Promise<void> {
+    await downloadDtePdf(pdfDataFromDte(dte));
+  }
+
+  async function downloadTicket(dte: DteEmitido): Promise<void> {
+    await downloadDteTicket(pdfDataFromDte(dte));
+  }
 
   function downloadJson(dte: DteEmitido): void {
     // El JWS guarda el DTE original en el payload (base64-url segundo segmento).
@@ -238,7 +261,9 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
         <DetalleModal
           dte={detalle}
           onClose={() => setDetalle(null)}
-          onDownload={() => downloadJson(detalle)}
+          onDownloadPdf={() => downloadPdf(detalle)}
+          onDownloadTicket={() => downloadTicket(detalle)}
+          onDownloadJson={() => downloadJson(detalle)}
           onAnular={() => { setAnulando(detalle); setDetalle(null); }}
           onCrearNc={() => { onCrearNc?.(detalle); setDetalle(null); }}
         />
@@ -301,11 +326,13 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
 /* ──────────────────────── Detalle Modal ──────────────────────── */
 
 function DetalleModal({
-  dte, onClose, onDownload, onAnular, onCrearNc,
+  dte, onClose, onDownloadPdf, onDownloadTicket, onDownloadJson, onAnular, onCrearNc,
 }: {
   dte: DteEmitido;
   onClose: () => void;
-  onDownload: () => void;
+  onDownloadPdf: () => void;
+  onDownloadTicket: () => void;
+  onDownloadJson: () => void;
   onAnular: () => void;
   onCrearNc: () => void;
 }) {
@@ -335,17 +362,23 @@ function DetalleModal({
         </Row>
 
         <div style={{ display: 'flex', gap: 'var(--s-2)', marginTop: 'var(--s-3)', flexWrap: 'wrap' }}>
-          <Button variant="secondary" leading={<Icon name="download" size={14} />} onClick={onDownload}>
-            Descargar JSON
+          <Button leading={<Icon name="file-text" size={14} />} onClick={onDownloadPdf}>
+            PDF (Carta)
+          </Button>
+          <Button variant="secondary" leading={<Icon name="receipt" size={14} />} onClick={onDownloadTicket}>
+            Ticket 80mm
+          </Button>
+          <Button variant="secondary" leading={<Icon name="download" size={14} />} onClick={onDownloadJson}>
+            JSON
           </Button>
           {!dte.anulado && (
             <Button variant="danger" leading={<Icon name="trash" size={14} />} onClick={onAnular}>
-              Anular DTE
+              Anular
             </Button>
           )}
           {dte.tipo === 'ccf' && !dte.anulado && (
             <Button leading={<Icon name="plus" size={14} />} onClick={onCrearNc}>
-              Crear Nota de Crédito
+              Crear NC
             </Button>
           )}
         </div>
@@ -378,17 +411,36 @@ function AnularModal({
   onClose: () => void;
   onAnulado: (r: AnularResultado) => void;
 }) {
+  // Extrae los datos REALES del receptor del JWS firmado. El MH valida que
+  // tipoDoc/numDoc/nombre coincidan con lo que envió el DTE original; si
+  // mandamos placeholders genéricos como "sin-doc", responde "DATO NO COINCIDE".
+  const receptorOriginal = parseReceptorFromJws(dte.documentoJws);
+  // Para FCF a consumidor anónimo (receptor null en el DTE original), MH
+  // espera placeholders convencionales — éstos son los que más se aceptan:
+  const defaultsAnonimo = {
+    tipoDocumento: '13',
+    numDocumento: '00000000-0',
+    nombre: 'CONSUMIDOR FINAL',
+  };
+  const initialReceptor = receptorOriginal ?? defaultsAnonimo;
+
   const [tipoAnulacion, setTipoAnulacion] = useState<'1' | '2' | '3'>('2');
   const [motivo, setMotivo] = useState('');
   const [nombreResp, setNombreResp] = useState('');
   const [docResp, setDocResp] = useState('');
-  const [nombreSol, setNombreSol] = useState(dte.cliente);
-  const [docSol, setDocSol] = useState(dte.nit ?? '');
+  const [nombreSol, setNombreSol] = useState(initialReceptor.nombre);
+  const [docSol, setDocSol] = useState(initialReceptor.numDocumento);
+  // Datos del receptor del DTE original (editables — el usuario ajusta si MH
+  // los rechaza). Por default pre-llenamos con lo del JWS o placeholders.
+  const [recepTipoDoc, setRecepTipoDoc] = useState(initialReceptor.tipoDocumento);
+  const [recepNumDoc, setRecepNumDoc] = useState(initialReceptor.numDocumento);
+  const [recepNombre, setRecepNombre] = useState(initialReceptor.nombre);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const valid = motivo.trim().length >= 5 && nombreResp.trim() && docResp.trim()
-    && nombreSol.trim() && docSol.trim();
+    && nombreSol.trim() && docSol.trim()
+    && recepTipoDoc && recepNumDoc.trim().length >= 3 && recepNombre.trim().length >= 5;
 
   async function ejecutar() {
     if (!valid) return;
@@ -402,9 +454,11 @@ function AnularModal({
         numeroControl: dte.numeroControl,
         fecEmi: dte.fecha,
         montoIva: dte.montoIva,
-        tipoDocumentoReceptor: dte.receptorTipoDocumento ?? '36',
-        numDocumentoReceptor: dte.nit ?? dte.dui ?? 'sin-doc',
-        nombreReceptor: dte.cliente,
+        // Estos 3 deben coincidir EXACTAMENTE con lo que el MH almacenó del
+        // DTE original — los traemos pre-llenados del JWS pero editables.
+        tipoDocumentoReceptor: recepTipoDoc,
+        numDocumentoReceptor: recepNumDoc,
+        nombreReceptor: recepNombre,
         tipoAnulacion: parseInt(tipoAnulacion, 10),
         motivoAnulacion: motivo,
         nombreResponsable: nombreResp,
@@ -464,6 +518,41 @@ function AnularModal({
         />
       </Field>
 
+      {/* Datos del RECEPTOR — deben coincidir con lo del DTE original */}
+      <div style={{
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        padding: 'var(--s-3)',
+        borderRadius: 'var(--r-md)',
+        marginTop: 'var(--s-3)',
+      }}>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)', marginBottom: 6 }}>
+          Datos del <strong>receptor original</strong> del DTE — el MH valida que coincidan con lo que envió.
+          {!receptorOriginal && (
+            <span style={{ color: 'var(--warning-text)', display: 'block', marginTop: 4 }}>
+              ⚠ El DTE fue a consumidor anónimo. Usa los placeholders convencionales si MH los rechaza prueba variaciones.
+            </span>
+          )}
+        </div>
+        <div className="two-col">
+          <Field label="Tipo de documento *">
+            <Select value={recepTipoDoc} onChange={e => setRecepTipoDoc(e.target.value)}>
+              <option value="13">13 — DUI</option>
+              <option value="36">36 — NIT</option>
+              <option value="02">02 — Carnet de Residente</option>
+              <option value="03">03 — Pasaporte</option>
+              <option value="37">37 — Otro</option>
+            </Select>
+          </Field>
+          <Field label="Número de documento *">
+            <Input type="text" value={recepNumDoc} onChange={e => setRecepNumDoc(e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Nombre / Razón social del receptor *">
+          <Input type="text" value={recepNombre} onChange={e => setRecepNombre(e.target.value)} />
+        </Field>
+      </div>
+
       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)', marginTop: 8 }}>
         Responsable de la anulación (quien autoriza desde tu empresa):
       </div>
@@ -496,6 +585,38 @@ function AnularModal({
       )}
     </Modal>
   );
+}
+
+/**
+ * Parsea el payload del JWS firmado para extraer el receptor REAL que se envió
+ * al MH. El MH valida estos campos contra lo que guardó del DTE original.
+ * Devuelve null si el JWS no se pudo parsear o si receptor era null
+ * (consumidor anónimo en FCF).
+ */
+function parseReceptorFromJws(jws?: string): {
+  tipoDocumento: string;
+  numDocumento: string;
+  nombre: string;
+} | null {
+  if (!jws) return null;
+  const parts = jws.split('.');
+  if (parts.length !== 3 || !parts[1]) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    const dte = JSON.parse(decoded) as Record<string, unknown>;
+    const r = (dte.receptor as Record<string, unknown> | null | undefined)
+      ?? (dte.sujetoExcluido as Record<string, unknown> | null | undefined);
+    if (!r) return null;
+    const tipoDocumento = r.tipoDocumento as string | null | undefined;
+    const numDocumento = r.numDocumento as string | null | undefined;
+    const nombre = r.nombre as string | null | undefined;
+    if (!tipoDocumento || !numDocumento || !nombre) return null;
+    return { tipoDocumento, numDocumento, nombre };
+  } catch {
+    return null;
+  }
 }
 
 // Export del tipo para que FacturacionPage pueda manejarlo en el flujo de NC

@@ -77,8 +77,10 @@ export function buildAnulacion(cfg: Config, input: AnulacionInput): AnulacionEve
       tipoDocumento: input.tipoDocumentoReceptor,
       numDocumento: input.numDocumentoReceptor,
       nombre: input.nombreReceptor,
-      telefono: input.telefonoReceptor ?? null,
-      correo: input.correoReceptor ?? null,
+      // Schema MH: documento.telefono y documento.correo deben ser string (no null)
+      // o estar AUSENTES. Por eso conditional spread en vez de `?? null`.
+      ...(input.telefonoReceptor ? { telefono: input.telefonoReceptor } : {}),
+      ...(input.correoReceptor ? { correo: input.correoReceptor } : {}),
     },
     motivo: {
       tipoAnulacion: input.tipoAnulacion,

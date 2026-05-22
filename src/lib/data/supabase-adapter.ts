@@ -1,5 +1,6 @@
 import type {
-  AppData, Compra, Contribuyente, Producto, ProductoTipo, ReporteGenerado, ReporteTipo,
+  AppData, Compra, Contribuyente, CorrelativoDte, Producto, ProductoTipo,
+  ReporteGenerado, ReporteTipo, TipoDteCode,
   VentaConsumidor, VentaContribuyente,
 } from '@/types/domain';
 import { requireSupabase } from '@/lib/supabase/client';
@@ -35,12 +36,13 @@ export class SupabaseAdapter implements DataAdapter {
     const supabase = requireSupabase();
     const companyId = await this.getCompanyId();
 
-    const [vc, vt, cp, cs, pr, rg] = await Promise.all([
+    const [vc, vt, cp, cs, pr, co, rg] = await Promise.all([
       supabase.from('ventas_consumidor').select('*').eq('company_id', companyId).order('fecha'),
       supabase.from('ventas_contribuyente').select('*').eq('company_id', companyId).order('fecha'),
       supabase.from('compras').select('*').eq('company_id', companyId).order('fecha'),
       supabase.from('contribuyentes').select('*').eq('company_id', companyId).order('nombre'),
       supabase.from('productos').select('*').eq('company_id', companyId).order('nombre'),
+      supabase.from('correlativos_dte').select('*').eq('company_id', companyId),
       supabase.from('reportes_generados').select('*').eq('company_id', companyId).order('generated_at', { ascending: false }),
     ]);
 
@@ -50,6 +52,7 @@ export class SupabaseAdapter implements DataAdapter {
       ['compras', cp.error],
       ['contribuyentes', cs.error],
       ['productos', pr.error],
+      ['correlativos_dte', co.error],
       ['reportes_generados', rg.error],
     ] as const;
     for (const [t, err] of labeled) if (err) console.error(`[ERP] load ${t} →`, err);
@@ -93,6 +96,11 @@ export class SupabaseAdapter implements DataAdapter {
         codActividad: r.cod_actividad ?? undefined,
         activo: r.activo,
       })) satisfies Producto[],
+      correlativosDte: (co.data ?? []).map(r => ({
+        id: r.id,
+        tipoDte: r.tipo_dte as TipoDteCode,
+        ultimoConsecutivo: r.ultimo_consecutivo,
+      })) satisfies CorrelativoDte[],
       reportesGenerados: (rg.data ?? []).map(r => ({
         id: r.id,
         tipo: r.tipo as ReporteTipo,
@@ -135,6 +143,7 @@ export class SupabaseAdapter implements DataAdapter {
       ['compras', new Set(data.compras.map(r => r.id))],
       ['contribuyentes', new Set(data.contribuyentes.map(r => r.id))],
       ['productos', new Set(data.productos.map(r => r.id))],
+      ['correlativos_dte', new Set(data.correlativosDte.map(r => r.id))],
       ['reportes_generados', new Set(data.reportesGenerados.map(r => r.id))],
     ];
 
@@ -240,6 +249,17 @@ export class SupabaseAdapter implements DataAdapter {
           uni_medida: r.uniMedida,
           cod_actividad: r.codActividad ?? null,
           activo: r.activo,
+        })),
+      )]);
+    }
+    if (data.correlativosDte.length) {
+      tasks.push(['correlativos_dte', supabase.from('correlativos_dte').upsert(
+        data.correlativosDte.map(r => ({
+          id: r.id,
+          company_id: companyId,
+          tipo_dte: r.tipoDte,
+          ultimo_consecutivo: r.ultimoConsecutivo,
+          updated_at: new Date().toISOString(),
         })),
       )]);
     }

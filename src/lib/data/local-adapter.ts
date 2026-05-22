@@ -9,6 +9,7 @@ const emptyCollections: AppData = {
   compras: [],
   contribuyentes: [],
   productos: [],
+  correlativosDte: [],
   reportesGenerados: [],
 };
 

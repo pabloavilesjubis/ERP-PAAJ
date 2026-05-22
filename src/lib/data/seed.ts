@@ -27,6 +27,7 @@ export function seedData(): AppData {
       { id: newId(), codigo: 'SRV-002', nombre: 'Instalación eléctrica', descripcion: 'Servicio de instalación con materiales incluidos', tipo: 'servicio', precioUnitario: '380.00', uniMedida: 59, activo: true },
       { id: newId(), codigo: 'BIE-001', nombre: 'Caja de tornillos 1/2"', descripcion: 'Caja x 100 unidades', tipo: 'bien', precioUnitario: '12.50', uniMedida: 59, activo: true },
     ],
+    correlativosDte: [],
     reportesGenerados: [],
   };
 }

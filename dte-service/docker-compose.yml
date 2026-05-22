@@ -18,29 +18,13 @@ services:
 
   dte-service:
     build: .
+    # env_file carga el .env LITERAL (sin interpolación) — necesario porque
+    # passwords con `$` o `${...}` rompen la interpolación de docker-compose.
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      PORT: 3000
-      MH_ENV: ${MH_ENV}
-      MH_NIT: ${MH_NIT}
-      MH_PASSWORD: ${MH_PASSWORD}
       FIRMADOR_URL: http://firmador:8113
-      FIRMADOR_NIT: ${MH_NIT}
-      FIRMADOR_PASSWORD: ${FIRMADOR_PASSWORD}
-      EMISOR_NRC: ${EMISOR_NRC}
-      EMISOR_NOMBRE: ${EMISOR_NOMBRE}
-      EMISOR_COD_ACTIVIDAD: ${EMISOR_COD_ACTIVIDAD}
-      EMISOR_DESC_ACTIVIDAD: ${EMISOR_DESC_ACTIVIDAD}
-      EMISOR_NOMBRE_COMERCIAL: ${EMISOR_NOMBRE_COMERCIAL}
-      EMISOR_TIPO_ESTABLECIMIENTO: ${EMISOR_TIPO_ESTABLECIMIENTO}
-      EMISOR_DEPARTAMENTO: ${EMISOR_DEPARTAMENTO}
-      EMISOR_MUNICIPIO: ${EMISOR_MUNICIPIO}
-      EMISOR_COMPLEMENTO: ${EMISOR_COMPLEMENTO}
-      EMISOR_TELEFONO: ${EMISOR_TELEFONO}
-      EMISOR_EMAIL: ${EMISOR_EMAIL}
-      PUNTO_VENTA_ESTABLECIMIENTO: ${PUNTO_VENTA_ESTABLECIMIENTO}
-      PUNTO_VENTA_PUNTO: ${PUNTO_VENTA_PUNTO}
     ports:
       - "127.0.0.1:3000:3000"        # consumido por el ERP, no público
     depends_on:

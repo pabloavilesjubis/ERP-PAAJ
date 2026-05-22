@@ -3,8 +3,9 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { PosTab, type NcContext } from './PosTab';
 import { ProductosTab } from './ProductosTab';
 import { DtesEmitidosTab, type DteEmitido } from './DtesEmitidosTab';
+import { CorrelativosTab } from './CorrelativosTab';
 
-type Tab = 'pos' | 'emitidos' | 'productos';
+type Tab = 'pos' | 'emitidos' | 'productos' | 'correlativos';
 
 export function FacturacionPage() {
   const [tab, setTab] = useState<Tab>('pos');
@@ -41,11 +42,15 @@ export function FacturacionPage() {
         <div className={`tab${tab === 'productos' ? ' active' : ''}`} onClick={() => setTab('productos')}>
           Productos / Servicios
         </div>
+        <div className={`tab${tab === 'correlativos' ? ' active' : ''}`} onClick={() => setTab('correlativos')}>
+          Correlativos
+        </div>
       </div>
 
       {tab === 'pos' && <PosTab ncContext={ncContext ?? undefined} />}
       {tab === 'emitidos' && <DtesEmitidosTab onCrearNc={handleCrearNc} />}
       {tab === 'productos' && <ProductosTab />}
+      {tab === 'correlativos' && <CorrelativosTab />}
     </div>
   );
 }
