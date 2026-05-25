@@ -7,6 +7,7 @@ import { KpiCard } from '@/components/ui/KpiCard';
 import { Modal } from '@/components/ui/Modal';
 import { RowActions } from '@/components/ui/RowActions';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
 import { IVA_RATE, MONTHS } from '@/config/constants';
 import { displayDate, fmt, inPeriod, matchesPeriod, newId, num } from '@/lib/utils/format';
 import { dedupePosImports, parsePosCsv } from '@/lib/utils/csv-pos-importer';
@@ -49,6 +50,7 @@ export function VentasConsumidorPage() {
       <SectionHeader
         title="Ventas al consumidor"
         description={`Facturas Electrónicas (FE) — ${mode === 'annual' ? `Año ${year}` : `${MONTHS[month]} ${year}`}`}
+        actions={<SyncDtesButton />}
       />
 
       <div className="tabs">

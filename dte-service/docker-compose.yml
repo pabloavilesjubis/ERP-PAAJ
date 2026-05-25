@@ -1,13 +1,16 @@
 services:
+  # ─── Firmador ───────────────────────────────────────────────────────────────
+  # Imagen oficial del MH publicada por svfe. SOPORTA MULTI-CERT por sí mismo:
+  # cada tenant deposita su `<NIT>.crt` en ./firmador/temp/ y firma pasando el
+  # NIT + password en cada request. Esto cubre la independencia fiscal entre
+  # tenants sin instanciar N containers.
   firmador:
-    # Imagen oficial del MH publicada por svfe — el cert va en ./firmador/temp/
-    # con nombre `<NIT>.crt` (formato XML propietario del MH, no es PKCS#12).
     image: svfe/svfe-api-firmador:v20230109
     container_name: svfe-api-firmador
     ports:
-      - "127.0.0.1:8113:8113"        # SOLO localhost — nunca exponer al exterior
+      - "127.0.0.1:8113:8113"            # SOLO localhost — nunca exponer al exterior
     volumes:
-      - ./firmador/temp:/uploads
+      - ./firmador/temp:/uploads          # multi-cert: un .crt por tenant
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:8113/firmardocumento/status || exit 1"]
@@ -16,18 +19,60 @@ services:
       retries: 3
       start_period: 30s
 
+  # ─── Postgres (SoT multi-tenant) ────────────────────────────────────────────
+  # Hospeda tenants, users, dtes, ventas, correlativos. Volumen persistente
+  # `pg-data`. Backup recomendado: snapshot del volumen + pg_dump diario.
+  postgres:
+    image: postgres:16-alpine
+    container_name: pipeline-erp-postgres
+    environment:
+      POSTGRES_DB: pipeline_erp
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    ports:
+      - "127.0.0.1:5432:5432"            # solo localhost
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline -d pipeline_erp"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # ─── dte-service (API multi-tenant) ─────────────────────────────────────────
+  # Cada request lleva tenant_id (extraído del JWT Supabase o del path /t/<slug>).
+  # Storage: Postgres para datos relacionales, filesystem para PDFs/JSONs
+  # generados (volumen `dte-data`).
   dte-service:
     build: .
-    # env_file carga el .env LITERAL (sin interpolación) — necesario porque
-    # passwords con `$` o `${...}` rompen la interpolación de docker-compose.
     env_file:
       - .env
     environment:
       NODE_ENV: production
       FIRMADOR_URL: http://firmador:8113
+      STORAGE_DIR: /app/data              # PDFs, JSONs, tickets generados
+      DATABASE_URL: postgres://pipeline:${POSTGRES_PASSWORD}@postgres:5432/pipeline_erp
     ports:
-      - "127.0.0.1:3000:3000"        # consumido por el ERP, no público
+      - "0.0.0.0:3000:3000"
+    volumes:
+      - dte-data:/app/data
+      - ./firmador/temp:/app/certs:ro     # acceso read-only a certs por tenant
     depends_on:
       firmador:
         condition: service_started
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  dte-data:                                # PDFs/JSONs/tickets
+  pg-data:                                 # base de datos
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt  # creá con: echo 'TU_PASSWORD_FUERTE' > secrets/postgres_password.txt

@@ -15,6 +15,7 @@ import { ContabilidadComprasPage } from '@/features/contabilidad/ContabilidadCom
 import { ContabilidadVentasPage } from '@/features/contabilidad/ContabilidadVentasPage';
 import { InteligenciaNegociosPage } from '@/features/contabilidad/InteligenciaNegociosPage';
 import { FacturacionPage } from '@/features/facturacion/FacturacionPage';
+import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
 
 export function App() {
   const { userId, loading, init: initAuth } = useAuthStore();
@@ -40,6 +41,8 @@ export function App() {
 
   return (
     <Routes>
+      {/* Onboarding va FUERA del AppShell (sin sidebar — pantalla completa) */}
+      <Route path="/onboarding" element={<OnboardingWizard />} />
       <Route element={<AppShell />}>
         <Route index element={<DashboardPage />} />
         <Route path="facturacion" element={<FacturacionPage />} />

@@ -24,9 +24,9 @@ export function emisorFromConfig(cfg: Config): EmisorComun {
     },
     telefono: cfg.EMISOR_TELEFONO ?? null,
     correo: cfg.EMISOR_EMAIL,
-    codEstableMH: null,
+    codEstableMH: cfg.EMISOR_COD_ESTABLE_MH ?? null,
     codEstable: cfg.PUNTO_VENTA_ESTABLECIMIENTO,
-    codPuntoVentaMH: null,
+    codPuntoVentaMH: cfg.EMISOR_COD_PUNTO_VENTA_MH ?? null,
     codPuntoVenta: cfg.PUNTO_VENTA_PUNTO,
   };
 }
@@ -75,9 +75,9 @@ export function emisorFseFromConfig(cfg: Config): EmisorFse {
     },
     telefono: cfg.EMISOR_TELEFONO ?? null,
     correo: cfg.EMISOR_EMAIL,
-    codEstableMH: null,
+    codEstableMH: cfg.EMISOR_COD_ESTABLE_MH ?? null,
     codEstable: cfg.PUNTO_VENTA_ESTABLECIMIENTO,
-    codPuntoVentaMH: null,
+    codPuntoVentaMH: cfg.EMISOR_COD_PUNTO_VENTA_MH ?? null,
     codPuntoVenta: cfg.PUNTO_VENTA_PUNTO,
   };
 }

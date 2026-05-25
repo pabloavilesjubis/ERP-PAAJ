@@ -5,6 +5,40 @@ import { usePeriodStore } from '@/stores/period.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { useDataStore } from '@/stores/data.store';
 import { isSupabaseConfigured } from '@/config/env';
+import { useBranding } from '@/branding/BrandingProvider';
+import { useAuth, signOut as saasSignOut } from '@/auth/useAuth';
+
+/**
+ * Devuelve sesión + signOut del auth local. Si no hay sesión SaaS, devuelve
+ * `{ user: null, signOutSaas: null }` para que el AppShell caiga al legacy
+ * auth.store (modo single-tenant PAAJ).
+ */
+function useSaasAuth() {
+  const { user } = useAuth();
+  return {
+    user,
+    signOutSaas: user ? () => saasSignOut() : null,
+  };
+}
+
+/**
+ * Logo + nombre del producto. Si el tenant cargó un logo_url propio, lo
+ * muestra; sino cae al texto PIPELINE ERP (o al productName del tenant).
+ */
+function ProductLogo() {
+  const branding = useBranding();
+  if (branding.logoUrl) {
+    return <img src={branding.logoUrl} alt={branding.productName} style={{ maxHeight: 32, maxWidth: 160 }} />;
+  }
+  return (
+    <div style={{
+      fontWeight: 700, fontSize: 18, letterSpacing: -0.3,
+      color: 'var(--brand-primary, #065f46)',
+    }}>
+      {branding.productName}
+    </div>
+  );
+}
 
 const NAV = [
   { to: '/', icon: 'home', label: 'Resumen fiscal', section: 'Declaración mensual', end: true },
@@ -35,9 +69,14 @@ const TITLES: Record<string, string> = {
 export function AppShell() {
   const location = useLocation();
   const { mode, month, year, setMode, setMonth, setYear } = usePeriodStore();
-  const { email, signOut } = useAuthStore();
+  const legacyAuth = useAuthStore();
   const dataError = useDataStore(s => s.error);
   const saving = useDataStore(s => s.saving);
+  // Soporta ambos modos: legacy (auth.store con email/signOut) y SaaS
+  // (Supabase via useAuth). El SaaS toma precedencia si hay sesión.
+  const { user, signOutSaas } = useSaasAuth();
+  const email = user?.email ?? legacyAuth.email;
+  const signOut = signOutSaas ?? legacyAuth.signOut;
 
   const sections = Array.from(new Set(NAV.map(n => n.section)));
 
@@ -45,7 +84,7 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <img src="/assets/logo.svg" alt="ABX Pyme" />
+          <ProductLogo />
         </div>
         {sections.map(section => (
           <div className="sidebar-section" key={section}>

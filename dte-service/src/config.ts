@@ -25,8 +25,33 @@ const schema = z.object({
   EMISOR_TELEFONO: z.string().optional(),
   EMISOR_EMAIL: z.string().email(),
 
+  // Códigos del CONTRIBUYENTE (definidos por vos, libres mientras cumplan formato).
+  // Se incrustan en `emisor.codEstable` / `emisor.codPuntoVenta` y arman el
+  // bloque de 8 chars del `numeroControl`. Para que MH no rechace, deben
+  // coincidir con los códigos dados de alta en el portal del MH para este NIT
+  // (o, si se setean `EMISOR_COD_*_MH` aparte, coincidir con esos).
   PUNTO_VENTA_ESTABLECIMIENTO: z.string().regex(/^[A-Z0-9]{4}$/),
   PUNTO_VENTA_PUNTO: z.string().regex(/^[A-Z0-9]{4}$/),
+
+  // Códigos asignados por MH al contribuyente (visibles en el portal,
+  // sección "Establecimientos"). Si están seteados se envían como
+  // `emisor.codEstableMH` y `emisor.codPuntoVentaMH`. Dejarlos vacíos sólo si
+  // MH no asignó códigos diferenciados — en producción casi siempre sí los hay.
+  EMISOR_COD_ESTABLE_MH: z.string().regex(/^[A-Z0-9]{4}$/).optional(),
+  EMISOR_COD_PUNTO_VENTA_MH: z.string().regex(/^[A-Z0-9]{4}$/).optional(),
+
+  // BEON compatibility layer
+  STORAGE_DIR: z.string().default('/app/data'),
+  PUBLIC_BASE_URL: z.string().url().optional(),     // ej. http://100.79.208.55:3000 — base de los URLs de pdf/json/ticket
+  BEON_API_KEY: z.string().optional(),              // si se define, los endpoints /dte y /clientes exigen X-API-Key con este valor
+  BEON_ALLOWED_ORIGINS: z.string().default('http://100.79.208.55:8000'),  // CSV
+
+  // Mailer (opcional) — si no se configura, /dte/reenviar-correo responde 503
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
 });
 
 export type Config = z.infer<typeof schema>;

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
+import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
 import { displayDate, fmt, num } from '@/lib/utils/format';
 import { useDataStore } from '@/stores/data.store';
 import { annulDte, DteServiceError } from '@/lib/dte/client';
@@ -190,6 +191,7 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
           <option value="procesado">Solo vigentes</option>
           <option value="anulado">Solo anulados</option>
         </Select>
+        <SyncDtesButton />
         <div style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>
           {filtered.length} de {dtes.length} DTEs
         </div>

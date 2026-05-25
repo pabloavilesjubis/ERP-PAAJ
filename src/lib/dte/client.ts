@@ -19,6 +19,8 @@ export interface DteEmitSuccess {
   numeroControl: string;
   estado: 'PROCESADO' | 'RECHAZADO';
   selloRecibido: string | null;
+  /** Correlativo finalmente usado — viene del SoT (dte-service). */
+  consecutivo: number;
   dte: Record<string, unknown>;
   documento: string;            // JWS firmado
   mh: Record<string, unknown>;
@@ -93,6 +95,92 @@ export function annulDte(payload: Record<string, unknown>): Promise<{
   mh: Record<string, unknown>;
 }> {
   return postJson('/annul', payload);
+}
+
+/**
+ * Record canónico devuelto por GET /dte/listar — incluye `dte_json` para
+ * reconstruir la VentaConsumidor/VentaContribuyente local con datos completos
+ * (descripción, totales, receptor) sin tener que hacer otra llamada.
+ */
+export interface DteListedRecord {
+  success: boolean;
+  erp_invoice_id: string;
+  beon_sale_id: string | null;
+  /** 'POS' = emitido desde ERP UI · 'BEON' = emitido vía API externa */
+  origen: 'POS' | 'BEON' | 'API';
+  tipo_dte: '01' | '03' | '05' | '14';
+  estado: 'EMITIDO' | 'RECHAZADO' | 'ANULADO';
+  codigo_generacion: string;
+  numero_control: string;
+  sello_recibido: string | null;
+  fh_procesamiento: string | null;
+  fec_emi: string;        // YYYY-MM-DD
+  hor_emi: string;        // HH:MM:SS
+  ambiente: '00' | '01';
+  receptor_correo: string | null;
+  receptor_nombre: string | null;
+  vendedor_nombre: string | null;
+  consecutivo: number;
+  dte_json: Record<string, unknown>;
+  documento_jws: string;
+  pdf_url: string | null;
+  json_url: string | null;
+  ticket_url: string | null;
+  qr_url: string | null;
+  anulacion: {
+    codigo_generacion_evento: string;
+    sello_evento: string | null;
+    fec_anula: string;
+    motivo: string;
+  } | null;
+  created_at: string;
+  updated_at: string;
+  erp_synced_at: string | null;
+}
+
+/** Lista DTEs almacenados en dte-service. Filtros opcionales para sync incremental. */
+export async function listDtes(opts: {
+  since?: string;
+  tipoDte?: '01' | '03' | '05' | '14';
+  estado?: 'EMITIDO' | 'RECHAZADO' | 'ANULADO';
+  limit?: number;
+} = {}): Promise<{ items: DteListedRecord[]; count: number; limit: number }> {
+  const params = new URLSearchParams();
+  if (opts.since) params.set('since', opts.since);
+  if (opts.tipoDte) params.set('tipo_dte', opts.tipoDte);
+  if (opts.estado) params.set('estado', opts.estado);
+  if (opts.limit) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  const url = `${env.dteServiceUrl.replace(/\/$/, '')}/dte/listar${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  if (!res.ok) {
+    throw new DteServiceError(
+      `HTTP ${res.status} listando DTEs`,
+      'LIST_FAILED',
+      res.status,
+      undefined,
+      null,
+    );
+  }
+  return res.json();
+}
+
+/**
+ * Confirma al server que el ERP ya pulleó este DTE. Setea erp_synced_at en
+ * el storage de dte-service para que /dte/replay-sync?only_unsynced=true sepa
+ * qué falta. Falla silenciosa (no-op si el server no responde).
+ */
+export async function ackDteSync(codigoGeneracion: string): Promise<void> {
+  const url = `${env.dteServiceUrl.replace(/\/$/, '')}/dte/ack-sync`;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codigo_generacion: codigoGeneracion }),
+    });
+  } catch {
+    // no-op — el sync no es crítico para la operación fiscal
+  }
 }
 
 /** Health check rápido del servicio. */

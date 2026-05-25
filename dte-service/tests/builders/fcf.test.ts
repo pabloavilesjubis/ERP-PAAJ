@@ -14,6 +14,7 @@ const cfg: Config = {
   EMISOR_DEPARTAMENTO: '06', EMISOR_MUNICIPIO: '14', EMISOR_COMPLEMENTO: 'Calle X',
   EMISOR_TELEFONO: '22220000', EMISOR_EMAIL: 'test@test.sv',
   PUNTO_VENTA_ESTABLECIMIENTO: 'C001', PUNTO_VENTA_PUNTO: '0001',
+  STORAGE_DIR: '/tmp/dte-test', BEON_ALLOWED_ORIGINS: '',
 };
 
 describe('buildFcf', () => {

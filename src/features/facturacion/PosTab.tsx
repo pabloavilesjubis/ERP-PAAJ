@@ -10,9 +10,8 @@ import { env } from '@/config/env';
 import {
   ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, getMunicipiosFor,
 } from '@/lib/catalogos/mh';
-import {
-  bumpCorrelativo, getProximoConsecutivo, tipoDteToCodigo,
-} from '@/lib/dte/correlativos';
+import { tipoDteToCodigo } from '@/lib/dte/correlativos';
+import { peekCorrelativo, type CorrelativoRecord } from '@/lib/dte/correlativos-client';
 import {
   downloadDtePdf, downloadDteTicket, extractPdfData, type PdfData,
 } from '@/lib/dte/pdf';
@@ -80,7 +79,6 @@ interface PosTabProps {
 export function PosTab({ ncContext }: PosTabProps = {}) {
   const productos = useDataStore(s => s.data.productos);
   const contribuyentes = useDataStore(s => s.data.contribuyentes);
-  const correlativosDte = useDataStore(s => s.data.correlativosDte);
   const patch = useDataStore(s => s.patch);
 
   const [search, setSearch] = useState('');
@@ -88,12 +86,24 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [tipoDte, setTipoDte] = useState<DteTipo>(ncContext ? 'nc' : 'fcf');
   const [clienteId, setClienteId] = useState<string>('');
-  // Consecutivo auto-driven: viene del store según el tipo activo. El usuario
-  // puede override si necesita (caso: re-emitir tras anulación), pero por
-  // default sigue la secuencia para no chocar con duplicados en el MH.
-  const proximoAuto = getProximoConsecutivo(correlativosDte, tipoDteToCodigo(tipoDte));
+
+  // Próximo correlativo: SOLO display, leído del SoT (dte-service). NO se
+  // predice localmente. Si el tipo no está sembrado, `correlativoState.seeded`
+  // será false y mostramos un bloqueo visible.
+  const [correlativoState, setCorrelativoState] = useState<CorrelativoRecord | null>(null);
+  const [correlativoError, setCorrelativoError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setCorrelativoError(null);
+    peekCorrelativo(tipoDteToCodigo(tipoDte))
+      .then(r => { if (!cancelled) setCorrelativoState(r); })
+      .catch(e => { if (!cancelled) setCorrelativoError(e instanceof Error ? e.message : 'error de red'); });
+    return () => { cancelled = true; };
+  }, [tipoDte]);
+  const proximoAuto = correlativoState?.seeded ? correlativoState.ultimo_consumido + 1 : null;
+  const seedReady = !!correlativoState?.seeded;
+
   const [consecutivoOverride, setConsecutivoOverride] = useState<string>('');
-  const consecutivo = consecutivoOverride !== '' ? consecutivoOverride : String(proximoAuto);
   const [emitting, setEmitting] = useState(false);
   const [result, setResult] = useState<DteEmitSuccess | null>(null);
   const [error, setError] = useState<{ message: string; details?: string[] } | null>(null);
@@ -281,26 +291,31 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
 
     try {
       let data: Record<string, unknown>;
-      const consecutivoNum = parseInt(consecutivo, 10) || 1;
+      // El correlativo se resuelve en dte-service (SoT único). Solo lo
+      // enviamos si el usuario hizo OVERRIDE explícito — en ese caso el
+      // server lo VALIDA contra ultimo_consumido (rechaza si ya fue usado).
+      // Sin override: omitir → server reserva atómicamente.
+      const overrideExplicit = consecutivoOverride.trim() !== '';
+      const consecutivoArg = overrideExplicit ? (parseInt(consecutivoOverride, 10) || undefined) : undefined;
       switch (tipoDte) {
         case 'fcf':
           data = buildFcfData({
-            consecutivo: consecutivoNum, lines: cart, receptor: cliente,
+            consecutivo: consecutivoArg, lines: cart, receptor: cliente,
           });
           break;
         case 'ccf':
           data = buildCcfData({
-            consecutivo: consecutivoNum, lines: cart, receptor: cliente!,
+            consecutivo: consecutivoArg, lines: cart, receptor: cliente!,
           });
           break;
         case 'fse':
           data = buildFseData({
-            consecutivo: consecutivoNum, lines: cart, sujetoExcluido: cliente!,
+            consecutivo: consecutivoArg, lines: cart, sujetoExcluido: cliente!,
           });
           break;
         case 'nc':
           data = buildNcData({
-            consecutivo: consecutivoNum,
+            consecutivo: consecutivoArg,
             lines: cart,
             receptor: cliente!,
             ncRef: ncContext!.ref,
@@ -310,15 +325,13 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
 
       const res = await emitDte({ tipo: tipoDte, data });
       setResult(res);
-      // Reset del override — el próximo emit volverá a usar el auto del store
-      // (que ya estará incrementado por el bump abajo).
+      // Reset del override
       setConsecutivoOverride('');
 
-      // Persistir en la tabla de ventas correspondiente para que aparezca en
-      // los anexos mensuales y en la pestaña DTEs Emitidos.
-      // Y actualizar el correlativo: ahora ultimoConsecutivo = el que acabamos
-      // de usar. Crítico: sin esto, el siguiente emit usaría el mismo número
-      // y el MH lo rechazaría como duplicado.
+      // Persistir en la tabla de ventas correspondiente. El correlativo que
+      // efectivamente se consumió viene en `res.consecutivo` (lo decidió el
+      // server). Actualizamos el cache local con ESE valor — nunca con el
+      // que pudimos haber pasado o el predicho desde el store.
       const codigoTipo = tipoDteToCodigo(tipoDte);
       await persistVenta({
         tipo: tipoDte,
@@ -329,10 +342,11 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
         documentoJws: res.documento,
         ncRelacionada: tipoDte === 'nc' ? ncContext?.ref.ccfCodigo : undefined,
       });
-      await patch(prev => ({
-        ...prev,
-        correlativosDte: bumpCorrelativo(prev.correlativosDte, codigoTipo, consecutivoNum),
-      }));
+      // Refrescamos el peek desde el server — no mantenemos prediction local.
+      // El SoT es dte-service; nuestro estado en componente es solo display.
+      peekCorrelativo(codigoTipo)
+        .then(r => setCorrelativoState(r))
+        .catch(() => { /* no crítico: el siguiente render lo intentará */ });
       setCart([]);
 
       // Dispara modal post-emisión: ofrece imprimir ticket y enviar correo
@@ -449,7 +463,10 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
 
   const canEmit = cart.length > 0
     && !emitting
-    && (tipoDte === 'fcf' || cliente !== null);
+    && (tipoDte === 'fcf' || cliente !== null)
+    // Bloqueo duro: si el tipo no está sembrado en dte-service, NO emitir.
+    // El usuario debe ir a CorrelativosTab a sembrar primero.
+    && seedReady;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 420px', gap: 'var(--s-5)' }}>
@@ -759,32 +776,45 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
           </div>
         </div>
 
-        {/* Consecutivo auto-driven desde store, override opcional */}
+        {/* Próximo consecutivo: leído del SoT (dte-service /correlativos/peek).
+            NO se predice localmente. Si el tipo no está sembrado, el panel
+            muestra bloqueo en rojo y `canEmit` queda en false. */}
         <div style={{
           display: 'flex', flexDirection: 'column', gap: 4,
           fontSize: 'var(--text-xs)', color: 'var(--fg-3)',
-          padding: 'var(--s-2)', background: 'var(--surface-2)',
+          padding: 'var(--s-2)',
+          background: seedReady ? 'var(--surface-2)' : 'var(--danger-bg, #fee2e2)',
+          border: seedReady ? 'none' : '1px solid var(--danger-border, #fca5a5)',
           borderRadius: 'var(--r-md)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Próximo consecutivo ({tipoDte.toUpperCase()})</span>
+            <span>Próximo consecutivo ({tipoDte.toUpperCase()}) — SoT dte-service</span>
             <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
-              {String(proximoAuto).padStart(15, '0')}
+              {proximoAuto !== null ? String(proximoAuto).padStart(15, '0') : '—'}
             </code>
           </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <span style={{ fontSize: 10 }}>Override (vacío = auto):</span>
-            <input
-              type="number"
-              min={1}
-              placeholder={String(proximoAuto)}
-              value={consecutivoOverride}
-              onChange={e => setConsecutivoOverride(e.target.value)}
-              style={{ flex: 1, padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 10 }}
-            />
-          </div>
+          {!seedReady && (
+            <div style={{ fontSize: 11, color: 'var(--danger-fg, #991b1b)', fontWeight: 600 }}>
+              {correlativoError
+                ? `No se pudo leer correlativo: ${correlativoError}`
+                : `Tipo ${tipoDteToCodigo(tipoDte)} NO está sembrado — emisión bloqueada. Andá a la pestaña Correlativos y sembrá el último consecutivo histórico.`}
+            </div>
+          )}
+          {seedReady && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 10 }}>Override (vacío = auto, server valida):</span>
+              <input
+                type="number"
+                min={1}
+                placeholder={proximoAuto !== null ? String(proximoAuto) : ''}
+                value={consecutivoOverride}
+                onChange={e => setConsecutivoOverride(e.target.value)}
+                style={{ flex: 1, padding: '2px 6px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 10 }}
+              />
+            </div>
+          )}
           <div style={{ fontSize: 10, color: 'var(--fg-4)' }}>
-            Configurar el último emitido en pestaña <strong>Correlativos</strong>.
+            Sembrar / corregir el último consecutivo en pestaña <strong>Correlativos</strong>.
           </div>
         </div>
 

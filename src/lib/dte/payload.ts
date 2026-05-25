@@ -44,7 +44,12 @@ export function calcCartTotals(lines: CartLine[], tipo: DteTipo): {
 /* ─────────────────────── Builders por tipo de DTE ─────────────────────── */
 
 export function buildFcfData(args: {
-  consecutivo: number;
+  /**
+   * Consecutivo opcional. Si se omite, dte-service lo reserva atómicamente
+   * desde su storage (SoT único). Solo pasalo si querés un override explícito
+   * — y entonces el server lo VALIDA contra ultimo_consumido.
+   */
+  consecutivo?: number;
   lines: CartLine[];
   receptor?: Contribuyente | null;
 }): Record<string, unknown> {
@@ -77,7 +82,12 @@ export function buildFcfData(args: {
 }
 
 export function buildCcfData(args: {
-  consecutivo: number;
+  /**
+   * Consecutivo opcional. Si se omite, dte-service lo reserva atómicamente
+   * desde su storage (SoT único). Solo pasalo si querés un override explícito
+   * — y entonces el server lo VALIDA contra ultimo_consumido.
+   */
+  consecutivo?: number;
   lines: CartLine[];
   receptor: Contribuyente;
 }): Record<string, unknown> {
@@ -117,7 +127,12 @@ export interface NcReference {
 }
 
 export function buildNcData(args: {
-  consecutivo: number;
+  /**
+   * Consecutivo opcional. Si se omite, dte-service lo reserva atómicamente
+   * desde su storage (SoT único). Solo pasalo si querés un override explícito
+   * — y entonces el server lo VALIDA contra ultimo_consumido.
+   */
+  consecutivo?: number;
   lines: CartLine[];
   receptor: Contribuyente;
   ncRef: NcReference;
@@ -142,7 +157,12 @@ export function buildNcData(args: {
 }
 
 export function buildFseData(args: {
-  consecutivo: number;
+  /**
+   * Consecutivo opcional. Si se omite, dte-service lo reserva atómicamente
+   * desde su storage (SoT único). Solo pasalo si querés un override explícito
+   * — y entonces el server lo VALIDA contra ultimo_consumido.
+   */
+  consecutivo?: number;
   lines: CartLine[];
   sujetoExcluido: Contribuyente;
   reteRenta?: number;

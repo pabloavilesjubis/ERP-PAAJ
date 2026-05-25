@@ -34,6 +34,12 @@ export interface VentaConsumidorMetadata {
   subtotal?: string;
   iva?: string;
   source?: 'pos' | 'manual';
+  /** Origen real del DTE — para reportes/conciliación. 'POS' = UI ERP · 'BEON' = API externa. */
+  origen?: 'POS' | 'BEON' | 'API';
+  /** Vendedor / cajero (lo pasa BEON en el body o lo setea el POS). */
+  vendedorNombre?: string;
+  /** ID del sale en BEON, para conciliación inversa. */
+  beonSaleId?: string;
   /** JWS compacto del DTE firmado — preserva el JSON original en payload base64. */
   documentoJws?: string;
   /** Si se ejecutó una anulación contra este DTE, el código del evento + sello. */
@@ -68,6 +74,10 @@ export interface VentaContribuyenteMetadata {
    */
   retencionRenta?: string;
   source?: 'manual' | 'imported';
+  /** Origen real del DTE — para reportes/conciliación. */
+  origen?: 'POS' | 'BEON' | 'API';
+  vendedorNombre?: string;
+  beonSaleId?: string;
   pdfPath?: string;              // si más adelante se adjunta PDF
   pdfFilename?: string;
   /** JWS compacto del DTE firmado — preserva el JSON original en payload base64. */

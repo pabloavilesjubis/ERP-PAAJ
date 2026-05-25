@@ -8,5 +8,5 @@ import type { AppData } from '@/types/domain';
 export interface DataAdapter {
   load(): Promise<AppData>;
   save(data: AppData): Promise<void>;
-  readonly kind: 'local' | 'supabase';
+  readonly kind: 'local' | 'supabase' | 'api';
 }

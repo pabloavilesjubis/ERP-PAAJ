@@ -7,6 +7,7 @@ import { KpiCard } from '@/components/ui/KpiCard';
 import { Modal } from '@/components/ui/Modal';
 import { RowActions } from '@/components/ui/RowActions';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
 import { IVA_RATE, MONTHS } from '@/config/constants';
 import { displayDate, fmt, matchesPeriod, newId, num } from '@/lib/utils/format';
 import { parseDteJson } from '@/lib/utils/dte-json-parser';
@@ -91,6 +92,7 @@ export function VentasContribuyentePage() {
       <SectionHeader
         title="Ventas al contribuyente (CCF)"
         description={`Comprobantes de Crédito Fiscal — ${mode === 'annual' ? `Año ${year}` : `${MONTHS[month]} ${year}`}`}
+        actions={<SyncDtesButton />}
       />
 
       <div className="tabs">
