@@ -19,6 +19,11 @@ dist-tsbuild
 temp/
 .claude
 *.jar
-*.tsbuildinfodte-service/secrets/
+*.tsbuildinfo
+dte-service/secrets/
+dte-service/.env
 dte-service/.env.backup*
+
+# DTE backend secrets
+dte-service/secrets/
 dte-service/.env

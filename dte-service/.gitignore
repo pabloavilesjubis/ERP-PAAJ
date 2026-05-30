@@ -7,3 +7,5 @@ coverage/
 firmador/temp/*.crt
 firmador/temp/.gitkeep
 .DS_Store
+
+secrets/
