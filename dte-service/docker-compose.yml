@@ -35,7 +35,9 @@ services:
       - "127.0.0.1:5432:5432"            # solo localhost
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      # NO montamos migrations en /docker-entrypoint-initdb.d. La aplicación
+      # corre via `npm run db:migrate` (tracking en tabla schema_migrations).
+      # Doble path = doble aplicación = errores.
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pipeline -d pipeline_erp"]
@@ -56,7 +58,16 @@ services:
       NODE_ENV: production
       FIRMADOR_URL: http://firmador:8113
       STORAGE_DIR: /app/data              # PDFs, JSONs, tickets generados
-      DATABASE_URL: postgres://pipeline:${POSTGRES_PASSWORD}@postgres:5432/pipeline_erp
+      # Postgres: env vars individuales en vez de DATABASE_URL para evitar
+      # bugs de URL-encoding con passwords que tienen `+`, `=`, `$`, `/`, `@`.
+      # El password se hereda del .env (env_file: .env arriba).
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: pipeline
+      PGDATABASE: pipeline_erp
+      # PGPASSWORD se inyecta automáticamente porque está en env_file
+      # como POSTGRES_PASSWORD — el código del db client cae a POSTGRES_PASSWORD
+      # si PGPASSWORD no está. No hay que duplicar.
     ports:
       - "0.0.0.0:3000:3000"
     volumes:

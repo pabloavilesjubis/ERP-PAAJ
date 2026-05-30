@@ -18,16 +18,36 @@ let pool: pg.Pool | null = null;
 
 export function getPool(): pg.Pool {
   if (pool) return pool;
+
+  // Preferimos env vars individuales sobre DATABASE_URL — los passwords
+  // generados con `openssl rand -base64` contienen `+` y `=` que rompen
+  // el parsing URL (reservados RFC 3986 sin escapar). Esto es robusto en
+  // todos los casos: el caller setea POSTGRES_PASSWORD y listo.
+  const pwd = process.env.PGPASSWORD ?? process.env.POSTGRES_PASSWORD;
   const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error('DATABASE_URL no configurado — Postgres requerido para PIPELINE ERP multi-tenant');
+
+  if (!pwd && !url) {
+    throw new Error('Postgres no configurado — setear POSTGRES_PASSWORD o DATABASE_URL');
   }
-  pool = new Pool({
-    connectionString: url,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-  });
+
+  pool = pwd
+    ? new Pool({
+        user: process.env.PGUSER ?? 'pipeline',
+        password: pwd,
+        host: process.env.PGHOST ?? 'postgres',
+        port: parseInt(process.env.PGPORT ?? '5432', 10),
+        database: process.env.PGDATABASE ?? 'pipeline_erp',
+        max: 10,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+      })
+    : new Pool({
+        connectionString: url,
+        max: 10,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+      });
+
   pool.on('error', err => {
     // eslint-disable-next-line no-console
     console.error('[pg] error inesperado del pool', err);

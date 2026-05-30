@@ -26,7 +26,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   async init() {
     set({ userId: 'local-user', email: 'local@offline', loading: false });
   },
-  async signIn() { return { error: 'Auth SaaS — usá /v2/auth/login' }; },
-  async signUp() { return { error: 'Auth SaaS — usá /v2/auth/signup' }; },
+  // Mensajes neutros — la auth de verdad la maneja `@/auth/useAuth` (SignInPage
+  // contra /v2/auth/login). Estos stubs solo sirven para que código viejo
+  // que importe useAuthStore.signIn/signUp compile, pero nunca debería verse
+  // un usuario llegar acá en SaaS.
+  async signIn() { return { error: 'Credenciales inválidas' }; },
+  async signUp() { return { error: 'Registro deshabilitado' }; },
   async signOut() { set({ userId: null, email: null }); },
 }));

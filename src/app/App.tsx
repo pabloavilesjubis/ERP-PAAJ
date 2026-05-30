@@ -3,44 +3,44 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { useAuthStore } from '@/stores/auth.store';
 import { useDataStore } from '@/stores/data.store';
-import { isSupabaseConfigured } from '@/config/env';
+import { useAuth } from '@/auth/useAuth';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { VentasConsumidorPage } from '@/features/ventas-consumidor/VentasConsumidorPage';
 import { VentasContribuyentePage } from '@/features/ventas-contribuyente/VentasContribuyentePage';
 import { ComprasPage } from '@/features/compras/ComprasPage';
 import { ContribuyentesPage } from '@/features/contribuyentes/ContribuyentesPage';
 import { CsvPage } from '@/features/csv/CsvPage';
-import { LoginPage } from '@/features/auth/LoginPage';
 import { ContabilidadComprasPage } from '@/features/contabilidad/ContabilidadComprasPage';
 import { ContabilidadVentasPage } from '@/features/contabilidad/ContabilidadVentasPage';
 import { InteligenciaNegociosPage } from '@/features/contabilidad/InteligenciaNegociosPage';
 import { FacturacionPage } from '@/features/facturacion/FacturacionPage';
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
 
+/**
+ * App routes. La autenticación la maneja exclusivamente `<AuthGate>` (en
+ * main.tsx), que envuelve a este componente. Cuando App se renderiza, el
+ * usuario YA está autenticado (o estamos en modo legacy local). NO hay un
+ * segundo gate de login aquí — y la ruta `/login` solo redirige por
+ * compatibilidad con URLs legacy.
+ */
 export function App() {
-  const { userId, loading, init: initAuth } = useAuthStore();
+  const { userId, init: initAuth } = useAuthStore();
   const { loaded, init: initData } = useDataStore();
+  const saasAuth = useAuth();
 
   useEffect(() => { initAuth(); }, [initAuth]);
   useEffect(() => {
-    if (userId) initData();
-  }, [userId, initData]);
-
-  if (loading) return <FullscreenLoader text="Inicializando…" />;
-
-  if (isSupabaseConfigured && !userId) {
-    return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    );
-  }
+    // En modo SaaS, el trigger es el JWT (saasAuth.user).
+    // En modo legacy, el trigger es userId del auth.store.
+    if (saasAuth.user || userId) initData();
+  }, [saasAuth.user, userId, initData]);
 
   if (!loaded) return <FullscreenLoader text="Cargando datos…" />;
 
   return (
     <Routes>
+      {/* Compat: /login legacy → home. AuthGate ya mostró SignInPage si no hay sesión. */}
+      <Route path="/login" element={<Navigate to="/" replace />} />
       {/* Onboarding va FUERA del AppShell (sin sidebar — pantalla completa) */}
       <Route path="/onboarding" element={<OnboardingWizard />} />
       <Route element={<AppShell />}>

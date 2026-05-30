@@ -40,8 +40,13 @@ const EmitBody = z.object({
 
 export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void {
   app.addHook('preHandler', async (req, reply) => {
-    // Aplica requireAuth a TODAS las rutas registradas en este plugin.
-    // Si el caller no tiene JWT válido, requireAuth ya respondió 401/403.
+    // Allowlist de rutas PÚBLICAS bajo /v2/ que NO deben gatear JWT acá:
+    //   - /v2/auth/*  (login, signup, refresh, me — auto-gestionan auth)
+    //   - /v2/onboarding/*  (tiene su propio hook tolerante a tenant=null)
+    // Sin estas excepciones el login devolvía AUTH_MISSING antes de llegar
+    // al handler (catch-22: para loguearte necesitabas estar logueado).
+    if (req.url.startsWith('/v2/auth/')) return;
+    if (req.url.startsWith('/v2/onboarding')) return;
     if (!req.url.startsWith('/v2/') && !req.url.startsWith('/t/')) return;
     await requireAuth(req, reply);
   });

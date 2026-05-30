@@ -69,6 +69,6 @@ ALTER ROLE pipeline BYPASSRLS;
 -- buscar tenant por slug ANTES de saber el tenant_id (caso onboarding,
 -- resolución de path /t/<slug>).
 
-INSERT INTO schema_migrations (version) VALUES ('003_rls_policies');
+INSERT INTO schema_migrations (version) VALUES ('003_rls_policies') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

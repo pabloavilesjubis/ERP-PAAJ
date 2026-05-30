@@ -256,11 +256,14 @@ CREATE TRIGGER trg_productos_updated BEFORE UPDATE ON productos
   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- ─── Tabla de control de migraciones ────────────────────────────────────────
-CREATE TABLE schema_migrations (
+-- IF NOT EXISTS porque el runner (src/db/migrate.ts ensureMigrationsTable())
+-- también la crea antes de aplicar. Idempotente.
+CREATE TABLE IF NOT EXISTS schema_migrations (
   version         TEXT PRIMARY KEY,
   applied_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO schema_migrations (version) VALUES ('001_initial');
+INSERT INTO schema_migrations (version) VALUES ('001_initial')
+  ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

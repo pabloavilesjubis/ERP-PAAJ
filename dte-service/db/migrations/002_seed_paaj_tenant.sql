@@ -35,6 +35,6 @@ VALUES
   (1, '14', FALSE, NULL, NULL, 0)
 ON CONFLICT (tenant_id, tipo_dte) DO NOTHING;
 
-INSERT INTO schema_migrations (version) VALUES ('002_seed_paaj_tenant');
+INSERT INTO schema_migrations (version) VALUES ('002_seed_paaj_tenant') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

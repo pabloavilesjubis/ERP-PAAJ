@@ -119,8 +119,10 @@ export function signOut(): void {
 }
 
 export function isAuthEnabled(): boolean {
-  // El SaaS multi-tenant SIEMPRE requiere auth — siempre true cuando hay
-  // dte-service URL. Eldot legacy single-tenant (sin VITE_DATA_ADAPTER=api)
-  // bypass se hace en AuthGate.
+  // PRODUCCIÓN: siempre requiere auth. Sin fallback a localStorage. Esto
+  // evita que un Vercel mal configurado (sin VITE_DATA_ADAPTER) deje pasar
+  // al usuario al modo offline single-tenant por accidente.
+  if (import.meta.env.PROD) return true;
+  // DESARROLLO: respeta el flag para poder seguir probando el modo legacy.
   return env.adapter === 'api';
 }
