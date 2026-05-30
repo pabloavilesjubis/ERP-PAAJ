@@ -115,6 +115,14 @@ export function SignInPage() {
             ? '¿No tenés cuenta? Cambiá a "Crear cuenta" arriba.'
             : 'Tu password se guarda hasheada (bcrypt) en nuestro Postgres self-hosted.'}
         </p>
+        {/* Debug discreto — confirma qué build y qué backend está usando.
+            Útil para troubleshooting de deploy. */}
+        <p style={{
+          marginTop: 8, fontSize: 10, color: '#d1d5db', textAlign: 'center',
+          fontFamily: 'ui-monospace, monospace',
+        }}>
+          build: PIPELINE-ERP-v2 · api: {(import.meta.env.VITE_DTE_SERVICE_URL ?? '(default)').replace(/^https?:\/\//, '')}
+        </p>
       </div>
     </div>
   );

@@ -94,37 +94,33 @@ export const useDataStore = create<DataState>((set, get) => ({
       // (Removido a propósito: el auto-sembrado desde data.correlativosDte.)
 
       // Post-load: traer DTEs emitidos vía API externa (BEON) que no
-      // pasaron por la UI. Falla silenciosa si dte-service no responde.
-      const kickSync = () => {
-        void get().syncDtes().then(r => {
-          if (r.ok && (r.added + r.updated) > 0) {
-            console.info(`[ERP] DTE sync: +${r.added} added, ${r.updated} updated, ${r.skipped} skipped (of ${r.fetched})`);
-          } else if (!r.ok) {
-            console.warn(`[ERP] DTE sync falló (no crítico): ${r.error}`);
-          }
-        });
-      };
-      kickSync();
-
-      // Polling periódico mientras la pestaña esté visible. Sin esto, una
-      // emisión BEON que ocurre con el ERP abierto no aparece hasta reload.
-      // Solo corre cuando document.visibilityState === 'visible' para no
-      // martillar el server con un tab en background.
-      if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-        const intervalMs = 30_000;
-        const interval = window.setInterval(() => {
-          if (document.visibilityState === 'visible' && get().loadOk) {
-            kickSync();
-          }
-        }, intervalMs);
-        // Sync inmediato cuando el usuario vuelve al tab (cambio offscreen→visible).
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible' && get().loadOk) kickSync();
-        });
-        // Cleanup en caso de hot-reload de Vite — evita múltiples intervals.
-        const w = window as unknown as { __erpSyncInterval?: number };
-        if (w.__erpSyncInterval) window.clearInterval(w.__erpSyncInterval);
-        w.__erpSyncInterval = interval;
+      // pasaron por la UI. SOLO corre en modo legacy single-tenant — en SaaS
+      // (api adapter) este sync NO existe; el ApiAdapter ya carga todo vía
+      // /v2/* directamente.
+      const isLegacy = getAdapter().kind !== 'api';
+      if (isLegacy) {
+        const kickSync = () => {
+          void get().syncDtes().then(r => {
+            if (r.ok && (r.added + r.updated) > 0) {
+              console.info(`[ERP] DTE sync: +${r.added} added, ${r.updated} updated, ${r.skipped} skipped (of ${r.fetched})`);
+            } else if (!r.ok) {
+              console.warn(`[ERP] DTE sync falló (no crítico): ${r.error}`);
+            }
+          });
+        };
+        kickSync();
+        if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+          const intervalMs = 30_000;
+          const interval = window.setInterval(() => {
+            if (document.visibilityState === 'visible' && get().loadOk) kickSync();
+          }, intervalMs);
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && get().loadOk) kickSync();
+          });
+          const w = window as unknown as { __erpSyncInterval?: number };
+          if (w.__erpSyncInterval) window.clearInterval(w.__erpSyncInterval);
+          w.__erpSyncInterval = interval;
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error cargando datos';
