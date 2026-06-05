@@ -58,16 +58,12 @@ services:
       NODE_ENV: production
       FIRMADOR_URL: http://firmador:8113
       STORAGE_DIR: /app/data              # PDFs, JSONs, tickets generados
-      # Postgres: env vars individuales en vez de DATABASE_URL para evitar
-      # bugs de URL-encoding con passwords que tienen `+`, `=`, `$`, `/`, `@`.
-      # El password se hereda del .env (env_file: .env arriba).
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGUSER: pipeline
-      PGDATABASE: pipeline_erp
-      # PGPASSWORD se inyecta automáticamente porque está en env_file
-      # como POSTGRES_PASSWORD — el código del db client cae a POSTGRES_PASSWORD
-      # si PGPASSWORD no está. No hay que duplicar.
+      # Conexión a Postgres: ahora apunta a SUPABASE. Las vars PGHOST/PGPORT/
+      # PGUSER/PGDATABASE/PGPASSWORD vienen del .env (env_file arriba). Antes
+      # estaban hardcodeadas acá apuntando al postgres local — se quitaron para
+      # que el .env mande. Para volver a la DB local: seteá PGHOST=postgres,
+      # PGUSER=pipeline, PGDATABASE=pipeline_erp en el .env (o borrá el bloque
+      # Supabase: el código defaultea a host 'postgres').
     ports:
       - "0.0.0.0:3000:3000"
     volumes:
