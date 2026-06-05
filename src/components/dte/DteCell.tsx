@@ -1,13 +1,23 @@
 import type { CSSProperties } from 'react';
 
 /**
- * Celda compacta con los datos fiscales de un DTE emitido + enlace a la
- * consulta pública del MH (que entrega el PDF y el JSON oficiales por
- * codigoGeneracion, sin depender de archivos locales).
+ * Las 3 celdas con los valores fiscales EXACTOS que usa Hacienda por cada DTE:
+ *   - Número de control  (DTE-NN-XXXX-NNNNNNNNNNNNNNN)
+ *   - Código de generación (UUID)
+ *   - Sello de recepción
+ * Más un enlace a la consulta pública del MH (PDF + JSON oficiales).
+ *
+ * `DteCells` devuelve un fragmento con <td>×3 — colocalo dentro de un <tr>,
+ * y agregá los 3 <th> correspondientes (Nº Control, Cód. Generación, Sello).
  */
 
-const mono: CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' };
-const tiny: CSSProperties = { ...mono, fontSize: '10px', color: 'var(--fg-4)' };
+const cell: CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: '11px',
+  wordBreak: 'break-all',
+  color: 'var(--fg-2)',
+};
+const dash = <span style={{ color: 'var(--fg-4)' }}>—</span>;
 
 /** URL de la consulta pública del MH (factura.gob.sv) → PDF + JSON oficiales. */
 export function mhFacturaUrl(
@@ -27,40 +37,31 @@ export interface DteFiscalMeta {
   selloRecibido?: string;
 }
 
-export function DteCell({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string }) {
+/** Fragmento de 3 <td>: número de control, código de generación, sello. */
+export function DteCells({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string }) {
   const m = meta ?? {};
-  if (!m.numeroControl && !m.codigoGeneracion) {
-    return <span style={{ color: 'var(--fg-4)' }}>—</span>;
-  }
   const url = mhFacturaUrl(m.codigoGeneracion, fecha);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {m.numeroControl && (
-        <code style={{ ...mono, color: 'var(--fg-2)' }} title={m.numeroControl}>
-          {m.numeroControl.replace(/^DTE-\d+-[^-]+-/, '#')}
-        </code>
-      )}
-      {m.codigoGeneracion && (
-        <span style={tiny} title={`Código de generación: ${m.codigoGeneracion}`}>
-          {m.codigoGeneracion.slice(0, 8)}…
-        </span>
-      )}
-      {m.selloRecibido && (
-        <span style={tiny} title={`Sello de recepción: ${m.selloRecibido}`}>
-          sello&nbsp;✓
-        </span>
-      )}
-      {url && (
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none' }}
-          title="Abrir factura en la consulta pública del MH (PDF + JSON)"
-        >
-          Ver factura ↗
-        </a>
-      )}
-    </div>
+    <>
+      <td style={cell}>
+        {m.numeroControl || dash}
+        {url && (
+          <>
+            {' '}
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: '#2563eb', textDecoration: 'none', whiteSpace: 'nowrap' }}
+              title="Abrir factura en la consulta pública del MH (PDF + JSON)"
+            >
+              ↗
+            </a>
+          </>
+        )}
+      </td>
+      <td style={cell}>{m.codigoGeneracion || dash}</td>
+      <td style={cell}>{m.selloRecibido || dash}</td>
+    </>
   );
 }

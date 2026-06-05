@@ -8,7 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { RowActions } from '@/components/ui/RowActions';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
-import { DteCell } from '@/components/dte/DteCell';
+import { DteCells } from '@/components/dte/DteCell';
 import { IVA_RATE, MONTHS } from '@/config/constants';
 import { displayDate, fmt, inPeriod, matchesPeriod, newId, num } from '@/lib/utils/format';
 import { dedupePosImports, parsePosCsv } from '@/lib/utils/csv-pos-importer';
@@ -508,7 +508,9 @@ function PosLikeTable({
       <thead>
         <tr>
           <th>Orden</th>
-          <th>DTE</th>
+          <th>Nº Control</th>
+          <th>Cód. Generación</th>
+          <th>Sello recepción</th>
           <th>Fecha</th>
           <th>Hora</th>
           <th>Vendedor</th>
@@ -521,7 +523,7 @@ function PosLikeTable({
       </thead>
       <tbody>
         {rows.length === 0 && (
-          <tr><td colSpan={10}><EmptyState title="Sin ventas registradas" description="Importa un reporte POS para empezar." /></td></tr>
+          <tr><td colSpan={12}><EmptyState title="Sin ventas registradas" description="Importa un reporte POS para empezar." /></td></tr>
         )}
         {rows.map(r => {
           const m = r.metadata ?? {};
@@ -531,7 +533,7 @@ function PosLikeTable({
           return (
             <tr key={r.id}>
               <td className="muted">{m.orden ?? '—'}</td>
-              <td><DteCell meta={m} fecha={r.fecha} /></td>
+              <DteCells meta={m} fecha={r.fecha} />
               <td className="muted">{displayDate(r.fecha)}</td>
               <td className="muted">{m.hora ?? ''}</td>
               <td>{m.autorizadoPor ?? ''}</td>
