@@ -6,6 +6,7 @@ import { Field, Input, Select } from '@/components/ui/Field';
 import { KpiCard } from '@/components/ui/KpiCard';
 import { Modal } from '@/components/ui/Modal';
 import { RowActions } from '@/components/ui/RowActions';
+import { DteCell } from '@/components/dte/DteCell';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
 import { IVA_RATE, MONTHS } from '@/config/constants';
@@ -346,12 +347,13 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                 <th>Fecha</th><th>Cliente</th><th>NRC</th><th>Descripción</th>
                 <th className="num">Gravado</th><th className="num">Exento</th>
                 <th className="num">IVA débito</th><th className="num">Retención</th>
+                <th>DTE</th>
                 <th style={{ width: 80 }} />
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={9}><EmptyState title="Sin CCF registrados" description="Agrega comprobantes de crédito fiscal." /></td></tr>
+                <tr><td colSpan={10}><EmptyState title="Sin CCF registrados" description="Agrega comprobantes de crédito fiscal." /></td></tr>
               )}
               {rows.map(r => {
                 const retencion = num(r.metadata?.retencionRenta ?? 0);
@@ -369,6 +371,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                         ? <span style={{ color: 'var(--warning-text)' }} title="Excluida del Pago a Cuenta 1.75%">{fmt(retencion)}</span>
                         : <span style={{ color: 'var(--fg-4)' }}>—</span>}
                     </td>
+                    <td><DteCell meta={r.metadata} fecha={r.fecha} /></td>
                     <td><RowActions onEdit={() => openEdit(r)} onDelete={() => del(r.id)} /></td>
                   </tr>
                 );

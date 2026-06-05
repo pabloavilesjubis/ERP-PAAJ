@@ -8,6 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { RowActions } from '@/components/ui/RowActions';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
+import { DteCell } from '@/components/dte/DteCell';
 import { IVA_RATE, MONTHS } from '@/config/constants';
 import { displayDate, fmt, inPeriod, matchesPeriod, newId, num } from '@/lib/utils/format';
 import { dedupePosImports, parsePosCsv } from '@/lib/utils/csv-pos-importer';
@@ -530,11 +531,7 @@ function PosLikeTable({
           return (
             <tr key={r.id}>
               <td className="muted">{m.orden ?? '—'}</td>
-              <td>
-                <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>
-                  {m.numeroControl ? m.numeroControl.replace(/^DTE-\d+-[^-]+-/, '#') : '—'}
-                </code>
-              </td>
+              <td><DteCell meta={m} fecha={r.fecha} /></td>
               <td className="muted">{displayDate(r.fecha)}</td>
               <td className="muted">{m.hora ?? ''}</td>
               <td>{m.autorizadoPor ?? ''}</td>
