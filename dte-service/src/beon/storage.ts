@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { CorrelativoNotSeededError } from '../errors.js';
+import * as correlativoRepo from '../tenants/correlativo.repo.js';
 
 /**
  * Persistencia simple basada en archivos JSON. Suficiente para el contrato BEON
@@ -131,6 +131,25 @@ export interface CorrelativoRecord {
 }
 
 const TIPOS_VALIDOS = new Set(['01', '03', '05', '14']);
+
+// ── Correlativos UNIFICADOS ───────────────────────────────────────────────
+// BEON ya NO usa archivos para la secuencia fiscal: delega al repo Postgres
+// (tabla tenant_correlativos en Supabase) — el MISMO contador que usa el ERP
+// nuevo vía /v2. Esto elimina el split que podía duplicar números de control.
+// BEON es single-tenant (PAAJ → tenant_id=1; override con BEON_TENANT_ID).
+const BEON_TENANT_ID = Number(process.env.BEON_TENANT_ID ?? 1);
+type CorrTipo = '01' | '03' | '05' | '14';
+function repoRowToRecord(r: Awaited<ReturnType<typeof correlativoRepo.peek>>): CorrelativoRecord {
+  return {
+    tipo_dte: r.tipo_dte,
+    seeded: r.seeded,
+    seeded_at: r.seeded_at,
+    seeded_by: r.seeded_by,
+    ultimo_consumido: r.ultimo_consumido,
+    reservados: r.reservados,
+    updated_at: r.updated_at,
+  };
+}
 
 export class Storage {
   constructor(public readonly baseDir: string) {}
@@ -276,45 +295,7 @@ export class Storage {
     if (!TIPOS_VALIDOS.has(tipoDte)) {
       throw new Error(`tipoDte inválido: ${tipoDte}`);
     }
-    const p = path.join(this.baseDir, 'correlativos', `${tipoDte}.json`);
-    const raw = await readJson<Partial<CorrelativoRecord> & { ultimo?: number }>(p);
-    if (raw) {
-      // Normalización completa de archivos legacy. Schemas vistos en disco:
-      //   v1 (pre-seeded-flag): { tipo_dte, ultimo, updated_at }
-      //   v2 (sin reservados):  { tipo_dte, ultimo_consumido, updated_at }
-      //   v3 (actual):          { tipo_dte, seeded, seeded_at, seeded_by,
-      //                            ultimo_consumido, reservados, updated_at }
-      // Sin esto, `reservarCorrelativo` crashea con
-      //   "Cannot read properties of undefined (reading 'length')"
-      // cuando `reservados` no existe.
-      const ultimoConsumido = typeof raw.ultimo_consumido === 'number'
-        ? raw.ultimo_consumido
-        : typeof raw.ultimo === 'number'           // alias legacy v1
-          ? raw.ultimo
-          : 0;
-      const rec: CorrelativoRecord = {
-        tipo_dte: raw.tipo_dte ?? tipoDte,
-        // Si el archivo existe sin flag, asumimos `seeded: true` (estaba en
-        // uso operativo antes del cambio). Para forzar re-seed explícito,
-        // borrá el archivo del volumen.
-        seeded: typeof raw.seeded === 'boolean' ? raw.seeded : true,
-        seeded_at: raw.seeded_at ?? raw.updated_at ?? null,
-        seeded_by: raw.seeded_by ?? 'legacy-pre-flag',
-        ultimo_consumido: ultimoConsumido,
-        reservados: Array.isArray(raw.reservados) ? raw.reservados : [],
-        updated_at: raw.updated_at ?? new Date().toISOString(),
-      };
-      return rec;
-    }
-    return {
-      tipo_dte: tipoDte,
-      seeded: false,
-      seeded_at: null,
-      seeded_by: null,
-      ultimo_consumido: 0,
-      reservados: [],
-      updated_at: new Date(0).toISOString(),
-    };
+    return repoRowToRecord(await correlativoRepo.peek(BEON_TENANT_ID, tipoDte as CorrTipo));
   }
 
   /**
@@ -328,20 +309,7 @@ export class Storage {
    * contra empezar en 1 y chocar con DTEs históricos en MH.
    */
   async reservarCorrelativo(tipoDte: string): Promise<number> {
-    return this.withCorrelativoLock(tipoDte, async () => {
-      const cur = await this.peekCorrelativo(tipoDte);
-      if (!cur.seeded) {
-        throw new CorrelativoNotSeededError(tipoDte);
-      }
-      const maxReservado = cur.reservados.length > 0 ? Math.max(...cur.reservados) : 0;
-      const next = Math.max(cur.ultimo_consumido, maxReservado) + 1;
-      await this.writeCorrelativo({
-        ...cur,
-        reservados: [...cur.reservados, next],
-        updated_at: new Date().toISOString(),
-      });
-      return next;
-    });
+    return correlativoRepo.reservar(BEON_TENANT_ID, tipoDte as CorrTipo);
   }
 
   /**
@@ -349,19 +317,7 @@ export class Storage {
    * mayor a ultimo_consumido, lo sube. Idempotente.
    */
   async consumirCorrelativo(tipoDte: string, consecutivo: number): Promise<CorrelativoRecord> {
-    return this.withCorrelativoLock(tipoDte, async () => {
-      const cur = await this.peekCorrelativo(tipoDte);
-      const reservados = cur.reservados.filter(n => n !== consecutivo);
-      const ultimo = Math.max(cur.ultimo_consumido, consecutivo);
-      const next: CorrelativoRecord = {
-        ...cur,
-        ultimo_consumido: ultimo,
-        reservados,
-        updated_at: new Date().toISOString(),
-      };
-      await this.writeCorrelativo(next);
-      return next;
-    });
+    return repoRowToRecord(await correlativoRepo.consumir(BEON_TENANT_ID, tipoDte as CorrTipo, consecutivo));
   }
 
   /**
@@ -370,17 +326,7 @@ export class Storage {
    * MH no exige contigüidad estricta.
    */
   async devolverCorrelativo(tipoDte: string, consecutivo: number): Promise<CorrelativoRecord> {
-    return this.withCorrelativoLock(tipoDte, async () => {
-      const cur = await this.peekCorrelativo(tipoDte);
-      const reservados = cur.reservados.filter(n => n !== consecutivo);
-      const next: CorrelativoRecord = {
-        ...cur,
-        reservados,
-        updated_at: new Date().toISOString(),
-      };
-      await this.writeCorrelativo(next);
-      return next;
-    });
+    return repoRowToRecord(await correlativoRepo.devolver(BEON_TENANT_ID, tipoDte as CorrTipo, consecutivo));
   }
 
   /**
@@ -394,31 +340,14 @@ export class Storage {
     ultimoConsumido: number,
     seededBy: string | null = null,
   ): Promise<CorrelativoRecord> {
-    return this.withCorrelativoLock(tipoDte, async () => {
-      const cur = await this.peekCorrelativo(tipoDte);
-      const nowIso = new Date().toISOString();
-      const nuevoUltimo = Math.max(cur.ultimo_consumido, ultimoConsumido);
-      const next: CorrelativoRecord = {
-        tipo_dte: tipoDte,
-        seeded: true,
-        seeded_at: cur.seeded_at ?? nowIso,    // primer seed gana en timestamp
-        seeded_by: cur.seeded_by ?? seededBy,
-        ultimo_consumido: nuevoUltimo,
-        reservados: cur.reservados.filter(n => n > nuevoUltimo),
-        updated_at: nowIso,
-      };
-      await this.writeCorrelativo(next);
-      return next;
-    });
+    return repoRowToRecord(
+      await correlativoRepo.sembrar(BEON_TENANT_ID, tipoDte as CorrTipo, ultimoConsumido, seededBy),
+    );
   }
 
   /** Lista todos los correlativos (todos los tipos). Útil para debug/UI. */
   async listarCorrelativos(): Promise<CorrelativoRecord[]> {
-    const out: CorrelativoRecord[] = [];
-    for (const tipo of TIPOS_VALIDOS) {
-      out.push(await this.peekCorrelativo(tipo));
-    }
-    return out;
+    return (await correlativoRepo.listAll(BEON_TENANT_ID)).map(repoRowToRecord);
   }
 
   private async writeCorrelativo(rec: CorrelativoRecord): Promise<void> {
