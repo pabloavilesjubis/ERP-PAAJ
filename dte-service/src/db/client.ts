@@ -30,6 +30,16 @@ export function getPool(): pg.Pool {
     throw new Error('Postgres no configurado — setear POSTGRES_PASSWORD o DATABASE_URL');
   }
 
+  // SSL: requerido por Supabase (y cualquier Postgres cloud). El Postgres local
+  // del Docker Compose NO usa SSL, así que lo activamos solo cuando detectamos
+  // un host cloud o se pide explícito con DB_SSL=require. `rejectUnauthorized:
+  // false` acepta el cert gestionado de Supabase sin tener que embeber su CA.
+  const host = process.env.PGHOST ?? '';
+  const needSsl = process.env.DB_SSL === 'require'
+    || /supabase\.(co|com)/.test(url ?? '')
+    || /supabase|pooler\.supabase/.test(host);
+  const ssl = needSsl ? { rejectUnauthorized: false } : undefined;
+
   pool = pwd
     ? new Pool({
         user: process.env.PGUSER ?? 'pipeline',
@@ -37,12 +47,14 @@ export function getPool(): pg.Pool {
         host: process.env.PGHOST ?? 'postgres',
         port: parseInt(process.env.PGPORT ?? '5432', 10),
         database: process.env.PGDATABASE ?? 'pipeline_erp',
+        ssl,
         max: 10,
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 5_000,
       })
     : new Pool({
         connectionString: url,
+        ssl,
         max: 10,
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 5_000,

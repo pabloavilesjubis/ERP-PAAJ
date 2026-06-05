@@ -28,15 +28,34 @@ const app = Fastify({
 // CORS allow-list. Unifica las dos vars históricas:
 //   - BEON_ALLOWED_ORIGINS (legacy single-tenant)
 //   - CORS_ALLOWED_ORIGINS (multi-tenant PIPELINE ERP — frontend Vercel)
-// Ambas se combinan para no romper deploys mid-migration.
-const allowedOrigins = [
+// Soporta wildcards globstar para subdominios:
+//   - `https://*.vercel.app`  → matchea cualquier preview de Vercel
+//   - `https://*.airboxpipeline.com`  → matchea subdominios propios
+const allowedOriginsRaw = [
   ...cfg.BEON_ALLOWED_ORIGINS.split(','),
   ...(process.env.CORS_ALLOWED_ORIGINS ?? '').split(','),
 ].map(s => s.trim()).filter(Boolean);
+
+// Convertimos cada entrada en una RegExp si lleva `*`, sino comparación literal.
+// Ejemplo: 'https://*.vercel.app' → /^https:\/\/[^.]+\.vercel\.app$/
+const allowedOriginPatterns = allowedOriginsRaw.map(raw => {
+  if (!raw.includes('*')) return { literal: raw };
+  const escaped = raw.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^.]+');
+  return { regex: new RegExp(`^${escaped}$`) };
+});
+
+function originAllowed(origin: string): boolean {
+  for (const p of allowedOriginPatterns) {
+    if ('literal' in p && p.literal && p.literal === origin) return true;
+    if ('regex' in p && p.regex && p.regex.test(origin)) return true;
+  }
+  return false;
+}
+
 await app.register(cors, {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);              // requests no-CORS (curl, server-to-server)
-    if (allowedOrigins.includes(origin)) return cb(null, true);
+    if (originAllowed(origin)) return cb(null, true);
     if (cfg.NODE_ENV !== 'production') return cb(null, true);  // dev: permissive
     return cb(null, false);
   },
@@ -163,7 +182,7 @@ function extractTopFrame(err: Error): string | undefined {
 try {
   const addr = await app.listen({ port: cfg.PORT, host: '0.0.0.0' });
   app.log.info(`DTE service listening on ${addr} · MH_ENV=${cfg.MH_ENV} · STORAGE_DIR=${cfg.STORAGE_DIR}`);
-  app.log.info(`BEON allowed origins: ${allowedOrigins.join(', ') || '(none — dev permissive)'}`);
+  app.log.info(`CORS allowed origins: ${allowedOriginsRaw.join(', ') || '(none — dev permissive)'}`);
   app.log.info(`BEON API-Key enforcement: ${cfg.BEON_API_KEY ? 'ON' : 'OFF (no key configured)'}`);
 } catch (err) {
   app.log.error(err);
