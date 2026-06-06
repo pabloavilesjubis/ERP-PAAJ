@@ -14,6 +14,7 @@ import { ContabilidadComprasPage } from '@/features/contabilidad/ContabilidadCom
 import { ContabilidadVentasPage } from '@/features/contabilidad/ContabilidadVentasPage';
 import { InteligenciaNegociosPage } from '@/features/contabilidad/InteligenciaNegociosPage';
 import { FacturacionPage } from '@/features/facturacion/FacturacionPage';
+import { ConfiguracionPage } from '@/features/configuracion/ConfiguracionPage';
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
 
 /**
@@ -54,6 +55,7 @@ export function App() {
         <Route path="contabilidad/inteligencia" element={<InteligenciaNegociosPage />} />
         <Route path="contribuyentes" element={<ContribuyentesPage />} />
         <Route path="csv" element={<CsvPage />} />
+        <Route path="configuracion" element={<ConfiguracionPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

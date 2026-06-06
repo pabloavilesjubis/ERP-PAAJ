@@ -107,4 +107,12 @@ export const v2 = {
     sembrar: (items: Array<{ tipo_dte: string; ultimo_consumido: number }>) =>
       api.post<{ resultados: unknown[] }>('/v2/correlativos/sembrar', { items }),
   },
+  /** Guarda branding del tenant (título del sidebar + logo). Vacío/null = quitar. */
+  updateBrand: (body: {
+    title?: string | null;
+    logo_url?: string | null;
+    color_primary?: string;
+    color_accent?: string;
+    footer_text?: string | null;
+  }) => api.put<{ success: boolean; brand_config: Record<string, unknown> }>('/v2/me/brand', body),
 };

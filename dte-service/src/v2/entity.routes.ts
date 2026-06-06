@@ -27,7 +27,8 @@ function tid(req: FastifyRequest): number {
 export function registerV2EntityRoutes(app: FastifyInstance): void {
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/v2/ventas') && !req.url.startsWith('/v2/compras')
-      && !req.url.startsWith('/v2/contribuyentes') && !req.url.startsWith('/v2/productos')) return;
+      && !req.url.startsWith('/v2/contribuyentes') && !req.url.startsWith('/v2/productos')
+      && !req.url.startsWith('/v2/me')) return;
     await requireAuth(req, reply);
   });
 
@@ -252,5 +253,27 @@ export function registerV2EntityRoutes(app: FastifyInstance): void {
         brand_config: t.brand_config ?? {},
       } : null,
     });
+  });
+
+  // ── PUT /v2/me/brand: el tenant edita su branding (título del sidebar + logo).
+  //    Hace merge con el brand_config existente (no pisa colores u otros campos).
+  app.put('/v2/me/brand', async (req, reply) => {
+    const tenantId = tid(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ALLOWED = ['title', 'logo_url', 'color_primary', 'color_accent', 'footer_text'];
+    const cur = await query<{ brand_config: Record<string, unknown> }>(
+      'SELECT brand_config FROM tenants WHERE id=$1', [tenantId],
+    );
+    const merged: Record<string, unknown> = { ...(cur.rows[0]?.brand_config ?? {}) };
+    for (const k of ALLOWED) {
+      if (k in b) {
+        const v = b[k];
+        if (v === null || v === '') delete merged[k];   // vacío = quitar
+        else merged[k] = v;
+      }
+    }
+    await query('UPDATE tenants SET brand_config = $1::jsonb, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(merged), tenantId]);
+    return reply.send({ success: true, brand_config: merged });
   });
 }

@@ -57,7 +57,8 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
       if (cancelled || !res.tenant) return;
       const bc = res.tenant.brand_config ?? {};
       setBrandingState({
-        productName: res.tenant.nombre_comercial || res.tenant.nombre_legal || DEFAULT_BRANDING.productName,
+        // `title` (editable en Configuración) gana; sino el nombre comercial del tenant.
+        productName: (bc.title as string) || res.tenant.nombre_comercial || res.tenant.nombre_legal || DEFAULT_BRANDING.productName,
         legalName: res.tenant.nombre_legal,
         logoUrl: (bc.logo_url as string) ?? null,
         colorPrimary: (bc.color_primary as string) ?? DEFAULT_BRANDING.colorPrimary,
@@ -73,8 +74,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     const r = document.documentElement;
     r.style.setProperty('--brand-primary', branding.colorPrimary);
     r.style.setProperty('--brand-accent', branding.colorAccent);
-    document.title = branding.productName;
-  }, [branding.colorPrimary, branding.colorAccent, branding.productName]);
+    // El tab del navegador siempre muestra el nombre del producto SaaS, no el
+    // branding del tenant (ese va en el sidebar).
+    document.title = 'PIPELINE ERP';
+  }, [branding.colorPrimary, branding.colorAccent]);
 
   const value = useMemo(() => ({
     branding,

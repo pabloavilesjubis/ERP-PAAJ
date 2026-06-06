@@ -51,6 +51,7 @@ const NAV = [
   { to: '/contabilidad/inteligencia', icon: 'building', label: 'Inteligencia de Negocios', section: 'Contabilidad' },
   { to: '/contribuyentes', icon: 'users', label: 'Contribuyentes', section: 'Catálogos' },
   { to: '/csv', icon: 'download', label: 'CSV / Plantillas', section: 'Datos' },
+  { to: '/configuracion', icon: 'edit', label: 'Configuración', section: 'Ajustes' },
 ] as const;
 
 const TITLES: Record<string, string> = {
@@ -64,6 +65,7 @@ const TITLES: Record<string, string> = {
   '/contabilidad/inteligencia': 'Inteligencia de Negocios',
   '/contribuyentes': 'Contribuyentes',
   '/csv': 'Importar / Exportar CSV',
+  '/configuracion': 'Configuración',
 };
 
 export function AppShell() {
