@@ -34,13 +34,17 @@ export function mhFacturaUrl(
 export interface DteFiscalMeta {
   numeroControl?: string;
   codigoGeneracion?: string;
+  /** En ventas a contribuyente el código de generación se guarda acá. */
+  numeroDocumento?: string;
   selloRecibido?: string;
 }
 
 /** Fragmento de 3 <td>: número de control, código de generación, sello. */
 export function DteCells({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string }) {
   const m = meta ?? {};
-  const url = mhFacturaUrl(m.codigoGeneracion, fecha);
+  // Consumidor usa `codigoGeneracion`; contribuyente lo guarda en `numeroDocumento`.
+  const codGen = m.codigoGeneracion || m.numeroDocumento;
+  const url = mhFacturaUrl(codGen, fecha);
   return (
     <>
       <td style={cell}>
@@ -60,7 +64,7 @@ export function DteCells({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string
           </>
         )}
       </td>
-      <td style={cell}>{m.codigoGeneracion || dash}</td>
+      <td style={cell}>{codGen || dash}</td>
       <td style={cell}>{m.selloRecibido || dash}</td>
     </>
   );
