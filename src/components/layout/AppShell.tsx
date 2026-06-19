@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useDataStore } from '@/stores/data.store';
 import { isSupabaseConfigured } from '@/config/env';
 import { useBranding } from '@/branding/BrandingProvider';
+import { usePlatformAdmin } from '@/admin/usePlatformAdmin';
 import { useAuth, signOut as saasSignOut } from '@/auth/useAuth';
 
 /**
@@ -52,6 +53,7 @@ const NAV = [
   { to: '/contribuyentes', icon: 'users', label: 'Contribuyentes', section: 'Catálogos' },
   { to: '/csv', icon: 'download', label: 'CSV / Plantillas', section: 'Datos' },
   { to: '/configuracion', icon: 'edit', label: 'Configuración', section: 'Ajustes' },
+  { to: '/admin/tenants', icon: 'building', label: 'Tenants', section: 'Plataforma', adminOnly: true },
 ] as const;
 
 const TITLES: Record<string, string> = {
@@ -66,6 +68,7 @@ const TITLES: Record<string, string> = {
   '/contribuyentes': 'Contribuyentes',
   '/csv': 'Importar / Exportar CSV',
   '/configuracion': 'Configuración',
+  '/admin/tenants': 'Tenants — Administración de plataforma',
 };
 
 export function AppShell() {
@@ -80,7 +83,9 @@ export function AppShell() {
   const email = user?.email ?? legacyAuth.email;
   const signOut = signOutSaas ?? legacyAuth.signOut;
 
-  const sections = Array.from(new Set(NAV.map(n => n.section)));
+  const isPlatformAdmin = usePlatformAdmin();
+  const visibleNav = NAV.filter(n => !('adminOnly' in n && n.adminOnly) || isPlatformAdmin);
+  const sections = Array.from(new Set(visibleNav.map(n => n.section)));
 
   return (
     <div className="app-shell">
@@ -91,7 +96,7 @@ export function AppShell() {
         {sections.map(section => (
           <div className="sidebar-section" key={section}>
             <div className="sidebar-section-label">{section}</div>
-            {NAV.filter(n => n.section === section).map(n => (
+            {visibleNav.filter(n => n.section === section).map(n => (
               <NavLink
                 key={n.to}
                 to={n.to}

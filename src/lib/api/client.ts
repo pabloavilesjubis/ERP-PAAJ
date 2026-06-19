@@ -115,4 +115,36 @@ export const v2 = {
     color_accent?: string;
     footer_text?: string | null;
   }) => api.put<{ success: boolean; brand_config: Record<string, unknown> }>('/v2/me/brand', body),
+
+  /** Datos del usuario + tenant + si es super-admin de plataforma. */
+  meFull: () => api.get<{ is_platform_admin?: boolean; tenant: { nombre_comercial: string | null } | null }>('/v2/me/full'),
+
+  /** Consola de plataforma (solo super-admin). */
+  admin: {
+    listTenants: () => api.get<{ items: AdminTenant[] }>('/v2/admin/tenants'),
+    createTenant: (body: AdminCreateTenant) =>
+      api.post<{ success: boolean; tenant_id: number; slug: string; admin_email: string }>('/v2/admin/tenants', body),
+    setStatus: (id: number, status: string) =>
+      api.put<{ success: boolean }>(`/v2/admin/tenants/${id}`, { status }),
+    uploadCert: (mh_nit: string, cert_base64: string) =>
+      api.post<{ success: boolean; cert_path: string }>('/v2/onboarding/cert', { mh_nit, cert_base64 }),
+  },
 };
+
+export interface AdminTenant {
+  id: number | string;
+  slug: string;
+  nombre_legal: string;
+  nombre_comercial: string | null;
+  status: string;
+  created_at: string;
+  users: number;
+  has_emisor: boolean;
+}
+
+export interface AdminCreateTenant {
+  tenant: { slug: string; nombre_legal: string; nombre_comercial?: string | null };
+  admin: { email: string; password: string; full_name?: string | null };
+  emisor: Record<string, unknown>;
+  correlativos: Array<{ tipo_dte: '01' | '03' | '05' | '14'; ultimo_consumido: number }>;
+}

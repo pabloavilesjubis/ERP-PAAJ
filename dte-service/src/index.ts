@@ -107,11 +107,13 @@ if (process.env.DATABASE_URL) {
   const { registerV2Routes } = await import('./v2/dte.routes.js');
   const { registerOnboardingRoutes } = await import('./v2/onboarding.routes.js');
   const { registerV2EntityRoutes } = await import('./v2/entity.routes.js');
+  const { registerAdminRoutes } = await import('./v2/admin.routes.js');
   registerAuthRoutes(app);
   registerV2Routes(app, cfg);
   registerOnboardingRoutes(app);
   registerV2EntityRoutes(app);
-  app.log.info('v2 multi-tenant routes + auth local + onboarding + entity CRUD activas');
+  registerAdminRoutes(app);
+  app.log.info('v2 multi-tenant routes + auth local + onboarding + entity CRUD + admin activas');
 } else {
   app.log.warn('DATABASE_URL ausente — rutas v2 multi-tenant deshabilitadas');
 }

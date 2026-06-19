@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireAuth } from '../auth/auth.middleware.js';
+import { isPlatformAdmin } from '../auth/platform-admin.js';
 import { query } from '../db/client.js';
 import { ValidationError } from '../errors.js';
 
@@ -246,6 +247,7 @@ export function registerV2EntityRoutes(app: FastifyInstance): void {
     const t = tRes.rows[0];
     return reply.send({
       user: req.auth,
+      is_platform_admin: isPlatformAdmin(req.auth?.email),
       tenant: t ? {
         id: t.id, slug: t.slug,
         nombre_legal: t.nombre_legal,
