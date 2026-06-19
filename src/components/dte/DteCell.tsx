@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { v2 } from '@/lib/api/client';
 
 /**
  * Las 3 celdas con los valores fiscales EXACTOS que usa Hacienda por cada DTE
@@ -76,13 +77,33 @@ export function DteCells({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string
   const url = mhFacturaUrl(codGen, fecha);
   const jws = m.documentoJws;
 
+  async function openPdf() {
+    if (!jws) return;
+    const w = window.open('', '_blank');
+    try {
+      const res = await v2.renderDte({
+        documentoJws: jws, codigoGeneracion: codGen,
+        numeroControl: m.numeroControl, selloRecibido: m.selloRecibido, fecEmi: fecha,
+      });
+      if (w) w.location.href = res.pdf_url; else window.open(res.pdf_url, '_blank');
+    } catch {
+      if (w) w.close();
+      // eslint-disable-next-line no-alert
+      alert('No se pudo generar el PDF de este DTE.');
+    }
+  }
+
   return (
     <>
       <td style={cell}>
         <div>{m.numeroControl || dash}</div>
         {(url || jws) && (
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-            {url && (
+            {jws ? (
+              <button type="button" style={btnStyle} onClick={openPdf} title="Generar y abrir el PDF del DTE">
+                PDF ⬇
+              </button>
+            ) : url && (
               <a href={url} target="_blank" rel="noreferrer" style={linkStyle} title="Ver / descargar el PDF oficial en el MH">
                 PDF ↗
               </a>

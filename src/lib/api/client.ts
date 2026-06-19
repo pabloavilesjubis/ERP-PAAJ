@@ -119,6 +119,16 @@ export const v2 = {
   /** Datos del usuario + tenant + si es super-admin de plataforma. */
   meFull: () => api.get<{ is_platform_admin?: boolean; tenant: { nombre_comercial: string | null } | null }>('/v2/me/full'),
 
+  /** Genera (y guarda) el PDF/JSON de un DTE a partir del documentoJws firmado. */
+  renderDte: (body: {
+    documentoJws: string;
+    codigoGeneracion?: string;
+    numeroControl?: string;
+    selloRecibido?: string;
+    fecEmi?: string;
+    tipoDte?: string;
+  }) => api.post<{ success: boolean; pdf_url: string; json_url: string; ticket_url: string }>('/v2/dte/render', body),
+
   /** Consola de plataforma (solo super-admin). */
   admin: {
     listTenants: () => api.get<{ items: AdminTenant[] }>('/v2/admin/tenants'),

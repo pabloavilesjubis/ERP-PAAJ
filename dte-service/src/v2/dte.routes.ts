@@ -7,6 +7,9 @@ import { buildFse, type FseInput } from '../dte/builders/fse.js';
 import { buildNc, type NcInput } from '../dte/builders/nc.js';
 import { firmar } from '../signing/firmador.js';
 import { submitDte } from '../mh/submit.js';
+import path from 'node:path';
+import { buildDteFiles } from '../beon/pdf.js';
+import type { DteRecord } from '../beon/storage.js';
 import { CorrelativoNotSeededError, ValidationError } from '../errors.js';
 import { validateAgainstSchema } from '../dte/validate.js';
 import { requireAuth } from '../auth/auth.middleware.js';
@@ -165,6 +168,30 @@ export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void 
         extractReceptorCorreo(dte), extractReceptorNombre(dte), consecutivo,
         JSON.stringify(dte), documento, JSON.stringify(result.raw),
       ]);
+
+      // Generar y GUARDAR PDF + JSON + ticket. No crítico: el DTE ya quedó
+      // emitido y persistido; si el PDF falla, no rompemos la emisión. Keyed por
+      // codigoGeneracion para que el visor del ERP los encuentre/cachee.
+      try {
+        const codGen = dte.identificacion.codigoGeneracion;
+        const rec = {
+          erp_invoice_id: codGen,
+          beon_sale_id: null, origen: 'POS', vendedor_nombre: req.auth?.email ?? null,
+          tipo_dte: codigoTipo, estado: 'EMITIDO',
+          codigo_generacion: codGen, numero_control: dte.identificacion.numeroControl,
+          sello_recibido: result.selloRecibido,
+          fh_procesamiento: (result.raw.fhProcesamiento as string) ?? null,
+          fec_emi: dte.identificacion.fecEmi, hor_emi: dte.identificacion.horEmi,
+          ambiente: dte.identificacion.ambiente,
+          receptor_correo: extractReceptorCorreo(dte), receptor_nombre: extractReceptorNombre(dte),
+          consecutivo, dte_json: dte, documento_jws: documento, mh_raw: result.raw,
+          pdf_path: null, json_path: null, ticket_path: null, anulacion: null, erp_synced_at: null,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        } as unknown as DteRecord;
+        await buildDteFiles({ rec, outDir: path.join(globalCfg.STORAGE_DIR, 'files') });
+      } catch (pdfErr) {
+        req.log.warn({ err: pdfErr }, 'no se pudo generar el PDF del DTE v2 (no crítico)');
+      }
 
       req.log.info({
         audit: 'CORRELATIVO_COMMITTED',
