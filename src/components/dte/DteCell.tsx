@@ -35,8 +35,13 @@ export function mhFacturaUrl(
   return `https://admin.factura.gob.sv/consultapublica?ambiente=${ambiente}&codGen=${encodeURIComponent(codigoGeneracion)}${f}`;
 }
 
-/** Decodifica el payload del JWS (= el DTE JSON canónico) y lo descarga. */
-function downloadDteJson(jws: string, numeroControl?: string): void {
+/**
+ * Decodifica el payload del JWS (= el DTE JSON canónico) y lo descarga.
+ * El `selloRecibido` NO viaja dentro del DTE firmado (Hacienda lo asigna como
+ * acuse tras la recepción), así que lo inyectamos para que el JSON quede
+ * completo: código de generación + número de control + SELLO de recepción.
+ */
+function downloadDteJson(jws: string, numeroControl?: string, selloRecibido?: string): void {
   try {
     const parts = jws.split('.');
     const payload = parts.length >= 2 ? parts[1]! : parts[0]!;
@@ -44,7 +49,9 @@ function downloadDteJson(jws: string, numeroControl?: string): void {
     const bin = atob(b64);
     const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
     const decoded = new TextDecoder('utf-8').decode(bytes);
-    const pretty = JSON.stringify(JSON.parse(decoded), null, 2);
+    const obj = JSON.parse(decoded) as Record<string, unknown>;
+    if (selloRecibido) obj.selloRecibido = selloRecibido;
+    const pretty = JSON.stringify(obj, null, 2);
     const blob = new Blob([pretty], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -113,7 +120,7 @@ export function DteCells({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string
               </a>
             )}
             {jws ? (
-              <button type="button" style={btnStyle} onClick={() => downloadDteJson(jws, m.numeroControl)} title="Descargar el JSON firmado del DTE">
+              <button type="button" style={btnStyle} onClick={() => downloadDteJson(jws, m.numeroControl, m.selloRecibido)} title="Descargar el JSON del DTE (con sello de recepción)">
                 JSON ⬇
               </button>
             ) : url && (
