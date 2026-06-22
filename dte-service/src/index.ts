@@ -87,6 +87,9 @@ await app.register(fastifyStatic, {
   // Sin listing de directorio. Solo lectura de archivos por nombre.
   index: false,
   list: false,
+  // Cache corto: los PDFs/JSON pueden regenerarse (rediseño de plantilla, etc.)
+  // y no queremos que el navegador muestre versiones viejas durante horas.
+  maxAge: 60_000,
 });
 
 // Rutas DTE existentes (consumidas por el ERP PAAJ) — necesitan storage
