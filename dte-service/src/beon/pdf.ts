@@ -68,123 +68,211 @@ interface MinimalDte {
 }
 
 async function renderA4(target: string, rec: DteRecord, qrDataUrl: string): Promise<void> {
-  const doc = new PDFDocument({ size: 'A4', margin: 36 });
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
   const stream = createWriteStream(target);
   doc.pipe(stream);
 
   const dte = rec.dte_json as unknown as MinimalDte;
-  const emisor = (dte.emisor ?? {}) as Record<string, string | undefined>;
+  const emisor = (dte.emisor ?? {}) as Record<string, unknown>;
   const receptor = (dte.receptor ?? dte.sujetoExcluido ?? null) as Record<string, unknown> | null;
   const items = dte.cuerpoDocumento ?? [];
-  const resumen = (dte.resumen ?? {}) as Record<string, number | string | undefined>;
+  const resumen = (dte.resumen ?? {}) as Record<string, unknown>;
+  const S = (v: unknown): string => (v === undefined || v === null ? '' : String(v));
+  const N = (v: unknown): number => Number(v ?? 0);
+  const money = (v: unknown): string => `$ ${N(v).toFixed(2)}`;
 
-  // Encabezado
-  doc.fontSize(14).font('Helvetica-Bold').text(TIPO_DTE_LABEL[rec.tipo_dte] ?? 'DOCUMENTO TRIBUTARIO ELECTRÓNICO', { align: 'center' });
-  doc.fontSize(9).font('Helvetica').text(rec.ambiente === '01' ? 'Ambiente: PRODUCCIÓN' : 'Ambiente: PRUEBA', { align: 'center' });
-  doc.moveDown(0.5);
+  // Paleta SaaS-grade
+  const BRAND = '#0f766e';      // teal-700
+  const BRAND_SOFT = '#d1fae5'; // emerald-100
+  const DARK = '#0f172a';       // slate-900
+  const BORDER = '#d8dee9';
+  const LABEL = '#64748b';      // slate-500
+  const TEXT = '#1e293b';       // slate-800
+  const ZEBRA = '#f8fafc';      // slate-50
 
-  // Bloque identificación
-  doc.fontSize(8).font('Helvetica-Bold').text('CÓDIGO DE GENERACIÓN:', { continued: true })
-    .font('Helvetica').text(` ${rec.codigo_generacion}`);
-  doc.font('Helvetica-Bold').text('NÚMERO DE CONTROL:', { continued: true })
-    .font('Helvetica').text(` ${rec.numero_control}`);
-  doc.font('Helvetica-Bold').text('SELLO RECIBIDO:', { continued: true })
-    .font('Helvetica').text(` ${rec.sello_recibido ?? '(pendiente)'}`);
-  doc.font('Helvetica-Bold').text('FECHA Y HORA:', { continued: true })
-    .font('Helvetica').text(` ${rec.fec_emi} ${rec.hor_emi}`);
-  doc.moveDown(0.5);
+  const M = 40;
+  const W = doc.page.width;
+  const R = W - M;          // right edge
+  const CW = R - M;         // content width
 
-  // Emisor / Receptor en dos columnas
-  const colWidth = (doc.page.width - 72) / 2;
-  const yStart = doc.y;
-  doc.fontSize(8).font('Helvetica-Bold').text('EMISOR', 36, yStart);
-  doc.font('Helvetica').text(`${emisor.nombre ?? ''}`, 36, doc.y, { width: colWidth - 6 });
-  doc.text(`NIT: ${emisor.nit ?? ''}`);
-  doc.text(`NRC: ${emisor.nrc ?? ''}`);
-  doc.text(`Actividad: ${emisor.descActividad ?? ''}`);
+  // ── Header con marca + tipo de DTE ──────────────────────────────────────
+  doc.rect(M, M, CW, 58).fill(BRAND);
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(15)
+    .text(S(emisor.nombreComercial) || S(emisor.nombre), M + 14, M + 11, { width: CW * 0.58, lineBreak: false });
+  doc.font('Helvetica').fontSize(8).fillColor(BRAND_SOFT)
+    .text(S(emisor.nombre), M + 14, M + 33, { width: CW * 0.58, lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(12).fillColor('#ffffff')
+    .text(TIPO_DTE_LABEL[rec.tipo_dte] ?? 'DOCUMENTO TRIBUTARIO ELECTRÓNICO', M, M + 13, { width: CW - 14, align: 'right' });
+  doc.font('Helvetica').fontSize(7.5).fillColor(BRAND_SOFT)
+    .text(`Documento Tributario Electrónico · Ambiente ${rec.ambiente === '01' ? 'PRODUCCIÓN' : 'PRUEBA'}`, M, M + 33, { width: CW - 14, align: 'right' });
 
-  doc.font('Helvetica-Bold').text('RECEPTOR', 36 + colWidth, yStart);
-  if (receptor) {
-    doc.font('Helvetica').text(`${String(receptor.nombre ?? '')}`, 36 + colWidth, doc.y, { width: colWidth - 6 });
-    if (receptor.nit) doc.text(`NIT: ${receptor.nit}`);
-    if (receptor.numDocumento) doc.text(`Doc: ${receptor.numDocumento}`);
-    if (receptor.nrc) doc.text(`NRC: ${receptor.nrc}`);
-    if (receptor.correo) doc.text(`${receptor.correo}`);
-  } else {
-    doc.font('Helvetica-Oblique').text('Consumidor anónimo', 36 + colWidth, doc.y);
+  let y = M + 58 + 12;
+
+  // ── Caja de identificación fiscal + QR ──────────────────────────────────
+  const idH = 80;
+  const qrSize = 66;
+  doc.lineWidth(0.8).strokeColor(BORDER).rect(M, y, CW, idH).stroke();
+  doc.image(qrBufferFromDataUrl(qrDataUrl), R - qrSize - 10, y + 7, { width: qrSize, height: qrSize });
+  doc.font('Helvetica').fontSize(5.5).fillColor(LABEL)
+    .text('Escanee para verificar', R - qrSize - 10, y + qrSize + 9, { width: qrSize, align: 'center' });
+  const idRows: Array<[string, string]> = [
+    ['Código de generación', rec.codigo_generacion],
+    ['Número de control', rec.numero_control],
+    ['Sello de recepción', rec.sello_recibido ?? '(pendiente)'],
+    ['Fecha y hora de emisión', `${rec.fec_emi}   ${rec.hor_emi}`],
+  ];
+  let iy = y + 9;
+  for (const [lab, val] of idRows) {
+    doc.font('Helvetica').fontSize(6).fillColor(LABEL).text(lab.toUpperCase(), M + 12, iy, { width: 150 });
+    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(TEXT).text(val, M + 12, iy + 7, { width: CW - qrSize - 40 });
+    iy += 17;
   }
-  doc.x = 36;
-  doc.moveDown(1);
+  y += idH + 12;
 
-  // Tabla de items
-  const tableTop = doc.y;
-  const cols = { num: 36, desc: 70, cant: 340, pu: 390, total: 460 };
-  doc.fontSize(8).font('Helvetica-Bold');
-  doc.text('#', cols.num, tableTop);
-  doc.text('Descripción', cols.desc, tableTop);
-  doc.text('Cant.', cols.cant, tableTop, { width: 40, align: 'right' });
-  doc.text('P. Unit.', cols.pu, tableTop, { width: 60, align: 'right' });
-  doc.text('Total', cols.total, tableTop, { width: 80, align: 'right' });
-  doc.moveTo(36, tableTop + 12).lineTo(doc.page.width - 36, tableTop + 12).stroke();
+  // ── Cajas Emisor / Receptor ─────────────────────────────────────────────
+  const gap = 12;
+  const boxW = (CW - gap) / 2;
+  const valW = boxW - 86;
+  const dir = (emisor.direccion ?? {}) as Record<string, unknown>;
+  const emisorRows: Array<[string, string]> = [
+    ['Nombre', S(emisor.nombre)],
+    ['NIT', S(emisor.nit)],
+    ['NRC', S(emisor.nrc)],
+    ['Actividad', S(emisor.descActividad)],
+    ['Dirección', S(dir.complemento)],
+    ['Tel · Correo', `${S(emisor.telefono)}  ${S(emisor.correo)}`.trim()],
+  ];
+  const rRows: Array<[string, string]> = receptor
+    ? [
+        ['Nombre', S(receptor.nombre)],
+        ['NIT', S(receptor.nit)],
+        ['Documento', S(receptor.numDocumento)],
+        ['NRC', S(receptor.nrc)],
+        ['Correo', S(receptor.correo)],
+      ]
+    : [['Cliente', 'CONSUMIDOR FINAL']];
 
-  let rowY = tableTop + 16;
-  doc.font('Helvetica');
-  for (const it of items) {
-    const cantidad = Number(it.cantidad ?? 0);
-    const precioUni = Number(it.precioUni ?? 0);
-    const ventaGravada = Number(it.ventaGravada ?? 0);
-    const numItem = Number(it.numItem ?? 0);
-    const descripcion = String(it.descripcion ?? '');
-    doc.text(String(numItem), cols.num, rowY);
-    doc.text(descripcion.slice(0, 60), cols.desc, rowY, { width: 260 });
-    doc.text(cantidad.toFixed(2), cols.cant, rowY, { width: 40, align: 'right' });
-    doc.text(precioUni.toFixed(2), cols.pu, rowY, { width: 60, align: 'right' });
-    doc.text(ventaGravada.toFixed(2), cols.total, rowY, { width: 80, align: 'right' });
-    rowY = doc.y + 2;
-    if (rowY > doc.page.height - 200) {
-      doc.addPage();
-      rowY = doc.y;
-    }
-  }
-
-  // Totales
-  doc.moveTo(36, rowY + 4).lineTo(doc.page.width - 36, rowY + 4).stroke();
-  let ty = rowY + 10;
-  const printTotal = (label: string, value: unknown): void => {
-    const v = Number(value ?? 0);
-    doc.font('Helvetica').text(label, 340, ty, { width: 100, align: 'right' });
-    doc.font('Helvetica-Bold').text(`$ ${v.toFixed(2)}`, 460, ty, { width: 80, align: 'right' });
-    ty += 12;
+  // Altura dinámica: cada valor puede ocupar varias líneas. Ambas cajas igualan
+  // al alto del contenido más largo para mantener la simetría.
+  const rowHeight = (val: string): number => {
+    doc.font('Helvetica-Bold').fontSize(7.5);
+    return Math.max(13.5, doc.heightOfString(val || ' ', { width: valW }) + 3);
   };
-  printTotal('Subtotal:', resumen.subTotal ?? resumen.subTotalVentas);
-  if (resumen.totalIva) printTotal('IVA 13%:', resumen.totalIva);
-  if (Array.isArray(resumen.tributos)) {
-    for (const t of resumen.tributos as Array<{ descripcion: string; valor: number }>) {
-      printTotal(`${t.descripcion}:`, t.valor);
+  const measure = (rows: Array<[string, string]>): number =>
+    23 + rows.filter(([, v]) => v).reduce((h, [, v]) => h + rowHeight(v), 0) + 7;
+  const boxH = Math.max(96, measure(emisorRows), measure(rRows));
+
+  const partyBox = (title: string, x: number, rows: Array<[string, string]>): void => {
+    doc.lineWidth(0.8).strokeColor(BORDER).rect(x, y, boxW, boxH).stroke();
+    doc.rect(x, y, boxW, 17).fill('#f1f5f9');
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(BRAND).text(title, x + 10, y + 5);
+    let ry = y + 23;
+    for (const [lab, val] of rows) {
+      if (!val) continue;
+      const h = rowHeight(val);
+      doc.font('Helvetica').fontSize(6).fillColor(LABEL).text(lab.toUpperCase(), x + 10, ry + 1, { width: 64 });
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(TEXT).text(val, x + 76, ry, { width: valW });
+      ry += h;
     }
+  };
+  partyBox('EMISOR', M, emisorRows);
+  partyBox('RECEPTOR', M + boxW + gap, rRows);
+  y += boxH + 16;
+
+  // ── Tabla de ítems ──────────────────────────────────────────────────────
+  const cTotalX = R - 78, cTotalW = 72;
+  const cPuX = cTotalX - 70, cPuW = 64;
+  const cCantX = cPuX - 52, cCantW = 46;
+  const cNumX = M + 8, cNumW = 20;
+  const cDescX = M + 32, cDescW = cCantX - cDescX - 6;
+  const tableTop = y;
+
+  doc.rect(M, y, CW, 18).fill(DARK);
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7.5);
+  doc.text('#', cNumX, y + 5.5, { width: cNumW });
+  doc.text('DESCRIPCIÓN', cDescX, y + 5.5, { width: cDescW });
+  doc.text('CANT.', cCantX, y + 5.5, { width: cCantW, align: 'right' });
+  doc.text('P. UNIT.', cPuX, y + 5.5, { width: cPuW, align: 'right' });
+  doc.text('TOTAL', cTotalX, y + 5.5, { width: cTotalW, align: 'right' });
+  y += 18;
+
+  let zebra = false;
+  for (const it of items) {
+    const desc = S(it.descripcion);
+    doc.font('Helvetica').fontSize(8);
+    const rowH = Math.max(16, doc.heightOfString(desc || ' ', { width: cDescW }) + 8);
+    if (y + rowH > doc.page.height - 230) { doc.addPage(); y = M; zebra = false; }
+    if (zebra) doc.rect(M, y, CW, rowH).fill(ZEBRA);
+    const total = N(it.ventaGravada) + N(it.ventaExenta) + N(it.ventaNoSuj);
+    doc.font('Helvetica').fontSize(8).fillColor(TEXT);
+    doc.text(S(it.numItem), cNumX, y + 4, { width: cNumW });
+    doc.text(desc, cDescX, y + 4, { width: cDescW });
+    doc.text(N(it.cantidad).toFixed(2), cCantX, y + 4, { width: cCantW, align: 'right' });
+    doc.text(money(it.precioUni), cPuX, y + 4, { width: cPuW, align: 'right' });
+    doc.font('Helvetica-Bold').text(money(total), cTotalX, y + 4, { width: cTotalW, align: 'right' });
+    doc.lineWidth(0.5).strokeColor(BORDER).moveTo(M, y + rowH).lineTo(R, y + rowH).stroke();
+    y += rowH;
+    zebra = !zebra;
   }
-  if (Number(resumen.ivaRete1) > 0) printTotal('Retención IVA 1%:', resumen.ivaRete1);
-  if (Number(resumen.reteRenta) > 0) printTotal('Retención Renta:', resumen.reteRenta);
-  printTotal('TOTAL:', resumen.montoTotalOperacion ?? resumen.totalPagar ?? resumen.subTotal);
+  // Marco exterior de la tabla
+  doc.lineWidth(0.8).strokeColor(BORDER).rect(M, tableTop, CW, y - tableTop).stroke();
+  y += 14;
 
-  doc.font('Helvetica-Oblique').fontSize(8).text(
-    `Son: ${String(resumen.totalLetras ?? '')}`,
-    36, ty + 6, { width: doc.page.width - 72 },
-  );
+  // ── Totales (caja) + "Son letras" ───────────────────────────────────────
+  const tw = 218;
+  const tx = R - tw;
+  const totalLines: Array<{ label: string; value: number; strong?: boolean }> = [];
+  const push = (label: string, v: unknown): void => { if (v !== undefined && v !== null) totalLines.push({ label, value: N(v) }); };
+  push('Subtotal', resumen.subTotal ?? resumen.subTotalVentas);
+  if (N(resumen.totalNoSuj) > 0) push('No sujeto', resumen.totalNoSuj);
+  if (N(resumen.totalExenta) > 0) push('Exento', resumen.totalExenta);
+  if (Array.isArray(resumen.tributos) && resumen.tributos.length > 0) {
+    for (const t of resumen.tributos as Array<{ descripcion?: string; valor?: number }>) {
+      push(t.descripcion ?? 'Tributo', t.valor);
+    }
+  } else if (N(resumen.totalIva) > 0) {
+    push('IVA 13%', resumen.totalIva);
+  }
+  if (N(resumen.ivaRete1) > 0) push('Retención IVA 1%', -N(resumen.ivaRete1));
+  if (N(resumen.reteRenta) > 0) push('Retención Renta', -N(resumen.reteRenta));
+  totalLines.push({ label: 'TOTAL A PAGAR', value: N(resumen.montoTotalOperacion ?? resumen.totalPagar ?? resumen.subTotal), strong: true });
 
-  // QR + pie
-  ty += 30;
-  doc.image(qrBufferFromDataUrl(qrDataUrl), 36, ty, { width: 90, height: 90 });
-  doc.fontSize(7).font('Helvetica').text(
-    'Para verificar este documento, escanee el QR\no visite admin.factura.gob.sv/consultaPublica',
-    140, ty + 10, { width: 240 },
+  const rowHt = 15;
+  const totH = totalLines.length * rowHt + 6;
+  doc.lineWidth(0.8).strokeColor(BORDER).rect(tx, y, tw, totH).stroke();
+  let ly = y + 4;
+  for (const ln of totalLines) {
+    if (ln.strong) {
+      doc.rect(tx, ly - 2, tw, rowHt + 2).fill(BRAND);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9.5);
+      doc.text(ln.label, tx + 10, ly + 1, { width: tw - 100 });
+      doc.text(money(ln.value), tx + tw - 92, ly + 1, { width: 82, align: 'right' });
+    } else {
+      doc.font('Helvetica').fontSize(8).fillColor(LABEL).text(ln.label, tx + 10, ly + 1, { width: tw - 100 });
+      doc.font('Helvetica-Bold').fillColor(TEXT).text(money(ln.value), tx + tw - 92, ly + 1, { width: 82, align: 'right' });
+    }
+    ly += rowHt;
+  }
+
+  // "Son: letras" a la izquierda de la caja de totales
+  doc.font('Helvetica').fontSize(6.5).fillColor(LABEL).text('VALOR EN LETRAS', M, y + 2, { width: tx - M - 16 });
+  doc.font('Helvetica-Bold').fontSize(8).fillColor(TEXT)
+    .text(S(resumen.totalLetras), M, y + 11, { width: tx - M - 16 });
+
+  y = Math.max(y + totH, ly) + 16;
+
+  // ── Pie ─────────────────────────────────────────────────────────────────
+  doc.lineWidth(0.6).strokeColor(BORDER).moveTo(M, y).lineTo(R, y).stroke();
+  doc.font('Helvetica').fontSize(6.5).fillColor(LABEL).text(
+    'Representación gráfica del Documento Tributario Electrónico. Verifique su validez escaneando el código QR o en admin.factura.gob.sv/consultapublica',
+    M, y + 6, { width: CW, align: 'center' },
   );
 
   if (rec.estado === 'ANULADO') {
     doc.save();
     doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
-    doc.fontSize(72).fillColor('red').opacity(0.3)
-      .text('ANULADO', 0, doc.page.height / 2 - 36, { align: 'center', width: doc.page.width });
+    doc.fontSize(80).fillColor('red').opacity(0.25)
+      .text('ANULADO', 0, doc.page.height / 2 - 40, { align: 'center', width: doc.page.width });
     doc.restore();
   }
 
