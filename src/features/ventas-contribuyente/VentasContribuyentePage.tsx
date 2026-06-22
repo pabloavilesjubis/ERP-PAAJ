@@ -62,6 +62,12 @@ const emptyForm: FormState = {
   retencionRenta: '',
 };
 
+/** Fecha de HOY en local (la del día en que se registra). */
+const fechaHoy = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 const RETENCION_RENTA_PCT = 0.10;     // 10% típico para servicios profesionales / sujetos retención
 
 const CLASE_DOCUMENTO_OPTIONS: { value: ClaseDocumento; label: string }[] = [
@@ -158,7 +164,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
   }
 
   function openNew() {
-    setForm({ ...emptyForm, fecha: `${year}-${String(month + 1).padStart(2, '0')}-01` });
+    setForm({ ...emptyForm, fecha: fechaHoy() });
     setEditId(null);
     resetModalState();
     setShowModal(true);
@@ -447,7 +453,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
 
           <div className="two-col">
             <Field label="Fecha *">
-              <Input type="date" value={form.fecha} onChange={e => setForm(p => ({ ...p, fecha: e.target.value }))} />
+              <Input type="date" value={form.fecha} disabled readOnly title="La fecha del registro es la del día actual" />
             </Field>
             <Field label="Clase de Documento *">
               <Select value={form.claseDocumento} onChange={e => setForm(p => ({ ...p, claseDocumento: e.target.value as ClaseDocumento }))}>

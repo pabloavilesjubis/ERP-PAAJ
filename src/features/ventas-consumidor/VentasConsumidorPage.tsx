@@ -21,6 +21,12 @@ import type { ReporteGenerado, VentaConsumidor } from '@/types/domain';
 
 const empty: Omit<VentaConsumidor, 'id'> = { fecha: '', descripcion: '', monto: '', notas: '' };
 
+/** Fecha de HOY en local (la del día en que se registra). */
+const fechaHoy = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 interface ImportSummary {
   imported: number;
   duplicates: number;
@@ -94,7 +100,7 @@ function MovimientosTab({ data, setCollection, mode, month, year }: MovimientosP
   const hasPosData = rows.some(r => r.metadata?.source === 'pos');
 
   function openNew() {
-    setForm({ ...empty, fecha: `${year}-${String(month + 1).padStart(2, '0')}-01` });
+    setForm({ ...empty, fecha: fechaHoy() });
     setEditId(null); setShowModal(true);
   }
   function openEdit(r: VentaConsumidor) {
@@ -261,7 +267,7 @@ function MovimientosTab({ data, setCollection, mode, month, year }: MovimientosP
           saveLabel={isSaving ? 'Guardando…' : 'Guardar'}
         >
           <div className="two-col">
-            <Field label="Fecha"><Input type="date" value={form.fecha} onChange={e => setForm(p => ({ ...p, fecha: e.target.value }))} /></Field>
+            <Field label="Fecha (hoy — no editable)"><Input type="date" value={form.fecha} disabled readOnly title="La fecha del registro es la del día actual" /></Field>
             <Field label="Monto total (con IVA)"><Input type="number" step="0.01" placeholder="0.00" value={form.monto} onChange={e => setForm(p => ({ ...p, monto: e.target.value }))} /></Field>
           </div>
           <Field label="Descripción"><Input type="text" placeholder="Descripción de la venta" value={form.descripcion} onChange={e => setForm(p => ({ ...p, descripcion: e.target.value }))} /></Field>
