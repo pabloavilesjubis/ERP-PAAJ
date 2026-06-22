@@ -96,11 +96,19 @@ async function renderA4(target: string, rec: DteRecord, qrDataUrl: string): Prom
   const CW = R - M;         // content width
 
   // ── Header con marca + tipo de DTE ──────────────────────────────────────
+  // Branding por origen: si el DTE se emitió vía la API de BEON, mostramos el
+  // nombre comercial (Beon). Si salió directo del ERP, solo el nombre legal —
+  // sin marca Beon.
+  const fromBeon = rec.origen === 'BEON' || !!rec.beon_sale_id;
+  const headerMain = fromBeon ? (S(emisor.nombreComercial) || S(emisor.nombre)) : S(emisor.nombre);
+  const headerSub = fromBeon ? S(emisor.nombre) : '';
   doc.rect(M, M, CW, 58).fill(BRAND);
   doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(15)
-    .text(S(emisor.nombreComercial) || S(emisor.nombre), M + 14, M + 11, { width: CW * 0.58, lineBreak: false });
-  doc.font('Helvetica').fontSize(8).fillColor(BRAND_SOFT)
-    .text(S(emisor.nombre), M + 14, M + 33, { width: CW * 0.58, lineBreak: false });
+    .text(headerMain, M + 14, headerSub ? M + 11 : M + 20, { width: CW * 0.58, lineBreak: false });
+  if (headerSub) {
+    doc.font('Helvetica').fontSize(8).fillColor(BRAND_SOFT)
+      .text(headerSub, M + 14, M + 33, { width: CW * 0.58, lineBreak: false });
+  }
   doc.font('Helvetica-Bold').fontSize(12).fillColor('#ffffff')
     .text(TIPO_DTE_LABEL[rec.tipo_dte] ?? 'DOCUMENTO TRIBUTARIO ELECTRÓNICO', M, M + 13, { width: CW - 14, align: 'right' });
   doc.font('Helvetica').fontSize(7.5).fillColor(BRAND_SOFT)

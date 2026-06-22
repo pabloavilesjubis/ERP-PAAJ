@@ -127,6 +127,8 @@ export const v2 = {
     selloRecibido?: string;
     fecEmi?: string;
     tipoDte?: string;
+    origen?: string;
+    beonSaleId?: string;
   }) => api.post<{ success: boolean; pdf_url: string; json_url: string; ticket_url: string }>('/v2/dte/render', body),
 
   /** Consola de plataforma (solo super-admin). */

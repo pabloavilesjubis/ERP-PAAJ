@@ -67,6 +67,9 @@ export interface DteFiscalMeta {
   selloRecibido?: string;
   /** DTE firmado (JWS). Su payload es el JSON canónico — para descarga. */
   documentoJws?: string;
+  /** Origen de la emisión: 'BEON' muestra marca Beon en el PDF; ERP no. */
+  origen?: string;
+  beonSaleId?: string;
 }
 
 /** Fragmento de 3 <td>: número de control (+ PDF/JSON), código de generación, sello. */
@@ -84,6 +87,7 @@ export function DteCells({ meta, fecha }: { meta?: DteFiscalMeta; fecha?: string
       const res = await v2.renderDte({
         documentoJws: jws, codigoGeneracion: codGen,
         numeroControl: m.numeroControl, selloRecibido: m.selloRecibido, fecEmi: fecha,
+        origen: m.origen, beonSaleId: m.beonSaleId,
       });
       if (w) w.location.href = res.pdf_url; else window.open(res.pdf_url, '_blank');
     } catch {

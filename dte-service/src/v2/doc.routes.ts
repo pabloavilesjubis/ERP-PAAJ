@@ -46,10 +46,12 @@ export function registerDocRoutes(app: FastifyInstance, cfg: Config): void {
 
     const pdfFile = path.join(filesDir, `${safeId}.pdf`);
     if (!existsSync(pdfFile)) {
+      const beonSaleId = b.beonSaleId || null;
+      const origen = b.origen || (beonSaleId ? 'BEON' : 'API');
       const rec = {
         erp_invoice_id: codGen,
-        beon_sale_id: null,
-        origen: 'API',
+        beon_sale_id: beonSaleId,
+        origen,
         vendedor_nombre: null,
         tipo_dte: (b.tipoDte || ident.tipoDte || '01'),
         estado: 'EMITIDO',
