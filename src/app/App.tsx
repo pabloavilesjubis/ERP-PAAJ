@@ -26,6 +26,7 @@ import { ConfigContablePage } from '@/features/accounting/pages/ConfigContablePa
 import { IntegracionPage } from '@/features/accounting/pages/IntegracionPage';
 import { SubledgerPage } from '@/features/accounting/pages/SubledgerPage';
 import { EstadosPage } from '@/features/accounting/pages/EstadosPage';
+import { BancosPage } from '@/features/banks/BancosPage';
 
 /**
  * App routes. La autenticación la maneja exclusivamente `<AuthGate>` (en
@@ -77,6 +78,11 @@ export function App() {
         <Route path="contabilidad/estados/resultados" element={<EstadosPage statement="resultados" />} />
         <Route path="contabilidad/estados/patrimonio" element={<EstadosPage statement="patrimonio" />} />
         <Route path="contabilidad/estados/flujo" element={<EstadosPage statement="flujo" />} />
+        <Route path="bancos" element={<Navigate to="/bancos/disponibilidad" replace />} />
+        <Route path="bancos/disponibilidad" element={<BancosPage tab="disponibilidad" />} />
+        <Route path="bancos/movimientos" element={<BancosPage tab="movimientos" />} />
+        <Route path="bancos/conciliacion" element={<BancosPage tab="conciliacion" />} />
+        <Route path="bancos/cuentas" element={<BancosPage tab="cuentas" />} />
         <Route path="cxc" element={<SubledgerPage key="cxc" kind="cxc" />} />
         <Route path="cxp" element={<SubledgerPage key="cxp" kind="cxp" />} />
         <Route path="contribuyentes" element={<ContribuyentesPage />} />

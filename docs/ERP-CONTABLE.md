@@ -9,7 +9,7 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 | F1 | Núcleo contable: catálogo, asientos, partidas, períodos, diario, mayor, balanza | ✅ |
 | F2 | Ventas/compras contabilizadas, CxC y CxP | ✅ |
 | F3 | Estados financieros y cierres | ✅ |
-| F4 | Bancos y conciliación | ⏳ |
+| F4 | Bancos y conciliación | ✅ |
 | F5 | Planillas | ⏳ |
 | F6 | Posición fiscal, DTEs recibidos, importaciones, activos fijos | ⏳ |
 
@@ -114,6 +114,23 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
   borradores ni ventas/compras con error. `reopen_year` revierte todo.
   Los estados de resultados excluyen las partidas de cierre/traslado.
 
+## Bancos (F4) — migración 009
+
+- Cuentas bancarias por empresa (cualquier banco), cada una ligada a una cuenta
+  de activo de movimiento del catálogo.
+- Estados de cuenta: lector BAC portado de ChuchoWash/Airbox
+  (`src/features/banks/bacParser.ts`) y lector CSV configurable por cuenta
+  (columnas, separador, filas a saltar, formato de fecha; se recuerda) para
+  Agrícola, Davivienda, Cuscatlán, etc. Deduplicación por hash; importar no
+  contabiliza.
+- Conciliación: con un cobro/pago existente, con una línea del mayor de la
+  cuenta bancaria, creando un cobro/pago aplicado a un documento de CxC/CxP, o
+  creando un asiento contra cualquier cuenta (comisiones, intereses, traslados).
+  Conciliación automática de candidatos únicos exactos. Deshacer revierte lo
+  creado.
+- Reporte de conciliación bancaria (saldo banco vs libros con partidas en
+  tránsito) y disponibilidad (bancos − reserva − proveedores).
+
 ## Convenciones del backend
 
 - Los módulos nuevos viven en `dte-service/src/erp/` y se registran como
@@ -136,6 +153,10 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
 - Menú filtrado por permiso (`perm` en `AppShell.NAV`).
 
 ## Tests
+
+Frontend (`npm test` en la raíz): lector BAC, lector CSV genérico y estados financieros.
+
+Backend:
 
 ```bash
 cd dte-service
