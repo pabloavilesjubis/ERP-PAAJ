@@ -11,7 +11,7 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 | F3 | Estados financieros y cierres | ✅ |
 | F4 | Bancos y conciliación | ✅ |
 | F5 | Planillas | ✅ |
-| F6 | Posición fiscal, DTEs recibidos, importaciones, activos fijos | ⏳ |
+| F6 | Posición fiscal, DTEs recibidos, importaciones, activos fijos | ✅ |
 
 ## Despliegue
 
@@ -29,6 +29,13 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 3. **Frontend**: push a `main` → Vercel.
 
 Orden: migraciones → backend → frontend.
+
+Variables de entorno nuevas del backend (opcionales):
+
+| Variable | Para qué |
+|---|---|
+| `ANTHROPIC_API_KEY` | Lectura de DUCA con IA (Importaciones). Sin ella, la DUCA se digita a mano. |
+| `MAILBOX_SCHEDULER=off` | Desactiva la revisión automática (cada 30 min) de los buzones de DTEs recibidos. |
 
 ## Roles y permisos (F0)
 
@@ -148,6 +155,41 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
   F-910 anual por empleado.
 - Pendiente: archivos de carga oficiales OVISSS/SEPP (el CSV actual es un
   resumen con los datos que piden; validar formato oficial).
+
+## Posición fiscal, DTEs recibidos, importaciones y activos fijos (F6) — migraciones 011–014
+
+- **Posición fiscal** (`/fiscal`): F-07 (débito − crédito − percepciones −
+  retenciones de clientes − remanente anterior; + retenciones de IVA hechas) con
+  remanente encadenado desde el mes inicial, y F-14 (pago a cuenta sobre ventas
+  sin retención de renta + renta retenida en planillas, liquidaciones y
+  compras). "Liquidar IVA" registra el asiento que salda débito/crédito contra
+  IVA por pagar (o deja remanente); los pagos F-07/F-14 salen del banco. La
+  disponibilidad bancaria descuenta los impuestos pendientes.
+- **DTEs recibidos** (`/dtes-recibidos`): subir JSON (varios a la vez) o
+  conectar el buzón IMAP de la empresa (solo lectura, contraseña cifrada,
+  revisión cada 30 min). Reglas de ChuchoWash: sin duplicados (código o sello,
+  contra el buzón y el libro de compras), receptor = la empresa, con sello del
+  MH, FCF rechazada; proveedor nuevo → Contribuyentes. Cada DTE válido entra a
+  `public.compras` y se contabiliza solo.
+- **Importaciones** (`/importaciones`): DUCA a mano o leída con IA
+  (`claude-opus-5-5`, streaming, fallback del servidor; el modelo solo lee y
+  las validaciones de ChuchoWash verifican la aritmética). Se registra como
+  documento 12 de Tesorería (columna L = valor en aduana + DAI); su asiento lleva
+  solo lo pagado en aduana (DAI + otros tributos a la cuenta destino, IVA
+  crédito fiscal, CxP Tesorería). La factura del proveedor del exterior va aparte.
+- **Activos fijos** (`/activos`): categorías con tasas máximas del Art. 30 LISR
+  y sus cuentas; alta por compra nueva (asiento), ya contabilizada o existente
+  con depreciación acumulada; tabla en línea recta; contabilización mensual;
+  baja o venta con resultado.
+
+## Pendientes conocidos
+
+- Archivos oficiales de carga OVISSS/SEPP (planilla) y formato oficial del F-910.
+- Anexos de retenciones/percepciones para Hacienda (el ERP ya genera anexos de
+  ventas, compras y F-14).
+- Importaciones con destino "venta" prorrateando costos al inventario (no hay
+  módulo de inventario en el ERP).
+- Usuarios en varias empresas con el mismo email (hoy: un usuario por empresa).
 
 ## Convenciones del backend
 

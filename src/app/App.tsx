@@ -28,6 +28,10 @@ import { SubledgerPage } from '@/features/accounting/pages/SubledgerPage';
 import { EstadosPage } from '@/features/accounting/pages/EstadosPage';
 import { BancosPage } from '@/features/banks/BancosPage';
 import { PlanillasPage } from '@/features/payroll/PlanillasPage';
+import { PosicionFiscalPage } from '@/features/fiscal/PosicionFiscalPage';
+import { RecibidosPage } from '@/features/received/RecibidosPage';
+import { ImportacionesPage } from '@/features/imports/ImportacionesPage';
+import { ActivosPage } from '@/features/assets/ActivosPage';
 
 /**
  * App routes. La autenticación la maneja exclusivamente `<AuthGate>` (en
@@ -91,6 +95,10 @@ export function App() {
         <Route path="planillas/liquidaciones" element={<PlanillasPage tab="liquidaciones" />} />
         <Route path="planillas/reportes" element={<PlanillasPage tab="reportes" />} />
         <Route path="planillas/configuracion" element={<PlanillasPage tab="configuracion" />} />
+        <Route path="fiscal" element={<PosicionFiscalPage />} />
+        <Route path="dtes-recibidos" element={<RecibidosPage />} />
+        <Route path="importaciones" element={<ImportacionesPage />} />
+        <Route path="activos" element={<ActivosPage />} />
         <Route path="cxc" element={<SubledgerPage key="cxc" kind="cxc" />} />
         <Route path="cxp" element={<SubledgerPage key="cxp" kind="cxp" />} />
         <Route path="contribuyentes" element={<ContribuyentesPage />} />

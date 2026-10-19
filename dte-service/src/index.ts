@@ -122,6 +122,10 @@ if (process.env.DATABASE_URL) {
   registerAdminRoutes(app);
   registerDocRoutes(app, cfg);
   await registerErpModules(app);
+  if (process.env.MAILBOX_SCHEDULER !== 'off') {
+    const { startMailboxScheduler } = await import('./erp/received/service.js');
+    startMailboxScheduler(app.log);
+  }
   app.log.info('v2 multi-tenant routes + auth local + onboarding + entity CRUD + admin activas');
 } else {
   app.log.warn('DATABASE_URL ausente — rutas v2 multi-tenant deshabilitadas');

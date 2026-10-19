@@ -247,13 +247,15 @@ export async function registerBankRoutes(app: FastifyInstance): Promise<void> {
         SELECT coalesce(sum(balance), 0) AS total,
                coalesce(sum(balance) FILTER (WHERE due_date <= CURRENT_DATE + 7), 0) AS due7
           FROM accounting.document_balances WHERE tenant_id = $1 AND kind = 'cxc' AND status = 'vigente' AND balance > 0`, [tenantId]);
+      // Impuestos pendientes (F-07 + F-14 de meses vencidos) si la posición fiscal está configurada
+      const taxes = (await q<{ t: number }>('SELECT accounting.fiscal_pending($1) AS t', [tenantId])).rows[0]?.t ?? 0;
       const banks = accounts.rows.reduce((s, a) => s + (a.statement_balance ?? a.ledger_balance), 0);
       const res = reserve.rows[0]?.amount ?? 0;
       const pay = payables.rows[0]!;
       return {
         accounts: accounts.rows, banks: Math.round(banks * 100) / 100, reserve: res, reserve_notes: reserve.rows[0]?.notes ?? null,
         payables: pay.total, payables_due_7: pay.due7, receivables: receivables.rows[0]!.total, receivables_due_7: receivables.rows[0]!.due7,
-        available: Math.round((banks - res - pay.total) * 100) / 100,
+        taxes, available: Math.round((banks - res - taxes - pay.total) * 100) / 100,
       };
     });
 
