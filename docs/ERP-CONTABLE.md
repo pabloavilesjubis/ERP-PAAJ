@@ -10,7 +10,7 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 | F2 | Ventas/compras contabilizadas, CxC y CxP | ✅ |
 | F3 | Estados financieros y cierres | ✅ |
 | F4 | Bancos y conciliación | ✅ |
-| F5 | Planillas | ⏳ |
+| F5 | Planillas | ✅ |
 | F6 | Posición fiscal, DTEs recibidos, importaciones, activos fijos | ⏳ |
 
 ## Despliegue
@@ -39,7 +39,7 @@ en `dte-service/src/auth/permissions.ts` y el frontend los consulta en
 | Rol | Puede |
 |---|---|
 | admin | todo, incluida la gestión de usuarios |
-| contador | contabilidad completa, cierres, fiscal, bancos, CxC/CxP, activos, ver planillas |
+| contador | contabilidad completa, cierres, fiscal, bancos, CxC/CxP, activos; consulta planillas |
 | auxiliar | partidas, cobros, pagos, conciliaciones (no cierra ni configura) |
 | rrhh | planillas, empleados, liquidaciones |
 | cajero | facturación y ventas |
@@ -130,6 +130,24 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
   creado.
 - Reporte de conciliación bancaria (saldo banco vs libros con partidas en
   tránsito) y disponibilidad (bancos − reserva − proveedores).
+
+## Planillas (F5) — migración 010 (esquema `payroll`)
+
+- Cálculo de ley de El Salvador portado de ChuchoWash: ISSS (tope $1,000),
+  AFP, INSAFORP opcional, renta por tablas (reforma 30/04/2025), horas extra,
+  asuetos, prima de vacaciones, aguinaldo 15/19/21 días, calendario comercial
+  de 30 días; despido (Art. 58 CT) y renuncia voluntaria. Todos los
+  parámetros y la tabla de renta son editables por empresa.
+- **Centros de costo** (en lugar de las áreas fijas de ChuchoWash) con cuentas
+  propias de sueldos/ISSS/AFP patronal; si no las definen, roles generales.
+- Planillas ordinarias (mensual/quincenal) y de aguinaldo: borrador editable
+  (faltas, horas extra, asuetos, vacación, bonos, descuentos) → emitir
+  (asiento) → registrar pago (asiento contra el banco, conciliable) → anular.
+- Liquidaciones con vista previa, finiquito PDF, pago y anulación.
+- Boletas de pago en PDF (2 por página), resumen ISSS/AFP (CSV) y base del
+  F-910 anual por empleado.
+- Pendiente: archivos de carga oficiales OVISSS/SEPP (el CSV actual es un
+  resumen con los datos que piden; validar formato oficial).
 
 ## Convenciones del backend
 

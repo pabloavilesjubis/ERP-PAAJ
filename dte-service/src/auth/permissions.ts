@@ -26,7 +26,8 @@ const ALL: readonly Permission[] = PERMISSIONS;
 
 const BY_ROLE: Record<Role, readonly Permission[]> = {
   admin: ALL,
-  contador: ALL.filter(p => p !== 'users:manage' && p !== 'payroll:terminate'),
+  // El contador consulta planillas; las gestiona RRHH (o el admin)
+  contador: ALL.filter(p => p !== 'users:manage' && p !== 'payroll:manage' && p !== 'payroll:terminate'),
   auxiliar: [
     'accounting:view', 'accounting:post',
     'receivables:view', 'receivables:manage',

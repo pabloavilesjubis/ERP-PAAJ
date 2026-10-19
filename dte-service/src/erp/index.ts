@@ -4,6 +4,7 @@ import { registerAccountingRoutes } from './accounting/routes.js';
 import { registerIntegrationRoutes } from './accounting/integration.routes.js';
 import { registerSubledgerRoutes } from './accounting/subledger.routes.js';
 import { registerBankRoutes } from './banks/routes.js';
+import { registerPayrollRoutes } from './payroll/routes.js';
 
 /**
  * Módulos ERP sobre la base multi-tenant: usuarios, contabilidad, CxC/CxP,
@@ -16,4 +17,5 @@ export async function registerErpModules(app: FastifyInstance): Promise<void> {
   await registerIntegrationRoutes(app);
   await registerSubledgerRoutes(app);
   await registerBankRoutes(app);
+  await registerPayrollRoutes(app);
 }
