@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type pg from 'pg';
+import pg from 'pg';
 import type { z } from 'zod';
 import { requireAuth } from '../auth/auth.middleware.js';
 import { getPool } from '../db/client.js';
@@ -16,6 +16,31 @@ import { ValidationError } from '../errors.js';
  *  - Los bodies se validan con zod (`parse`).
  */
 
+/**
+ * Tipos para los módulos ERP: BIGINT (ids) y NUMERIC (montos) como number,
+ * DATE como 'YYYY-MM-DD' (sin pasar por Date → sin corrimiento de zona).
+ * Solo aplica a las consultas hechas con `q()`; las rutas legacy no cambian.
+ */
+const ERP_TYPES = {
+  getTypeParser(oid: number, format?: 'text' | 'binary') {
+    if (oid === 20 || oid === 1700) return (v: string) => (v === null ? null : Number(v));
+    if (oid === 1082) return (v: string) => v;
+    // int8[] / numeric[] → number[] (se parsean como text[] y se convierten)
+    if (oid === 1016 || oid === 1231) {
+      const parseTextArray = pg.types.getTypeParser(1009 as never, 'text') as (v: string) => string[];
+      return (v: string) => parseTextArray(v).map(Number);
+    }
+    return pg.types.getTypeParser(oid as never, format ?? 'text');
+  },
+} as unknown as pg.CustomTypesConfig;
+
+/** Consulta con los tipos ERP. Con `db`, dentro de la transacción indicada. */
+export async function q<T extends pg.QueryResultRow = pg.QueryResultRow>(
+  text: string, params: unknown[] = [], db?: pg.PoolClient,
+): Promise<pg.QueryResult<T>> {
+  return (db ?? getPool()).query<T>({ text, values: params, types: ERP_TYPES });
+}
+
 export interface Ctx {
   tenantId: number;
   userId: string;
@@ -25,7 +50,7 @@ export interface Ctx {
 
 export function ctx(req: FastifyRequest): Ctx {
   if (!req.tenantId || !req.auth) throw new ValidationError('Sesión sin empresa resuelta');
-  return { tenantId: req.tenantId, userId: req.auth.userId, userName: req.auth.email };
+  return { tenantId: req.tenantId, userId: req.auth.userId, userName: req.auth.name || req.auth.email };
 }
 
 export function parse<T extends z.ZodTypeAny>(schema: T, data: unknown): z.infer<T> {
@@ -48,11 +73,18 @@ export async function authedPlugin(app: FastifyInstance, fn: (r: FastifyInstance
   });
 }
 
-/** Transacción con un cliente dedicado; los asientos se validan al COMMIT. */
-export async function tx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+/**
+ * Transacción con un cliente dedicado; los asientos se validan al COMMIT.
+ * Con `c`, fija el usuario de la transacción (app.user_id / app.user_name),
+ * que las funciones contables usan para "registrado por".
+ */
+export async function tx<T>(fn: (c: pg.PoolClient) => Promise<T>, c?: Ctx): Promise<T> {
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
+    if (c) {
+      await client.query(`SELECT set_config('app.user_id', $1, true), set_config('app.user_name', $2, true)`, [c.userId, c.userName]);
+    }
     const out = await fn(client);
     await client.query('COMMIT');
     return out;

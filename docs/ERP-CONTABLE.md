@@ -6,7 +6,7 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 | Fase | Módulo | Estado |
 |---|---|---|
 | F0 | Fundaciones: roles y permisos, usuarios por empresa, migraciones, tests, CI | ✅ |
-| F1 | Núcleo contable: catálogo, asientos, partidas, períodos, diario, mayor, balanza | ⏳ |
+| F1 | Núcleo contable: catálogo, asientos, partidas, períodos, diario, mayor, balanza | ✅ |
 | F2 | Ventas/compras contabilizadas, CxC y CxP | ⏳ |
 | F3 | Estados financieros y cierres | ⏳ |
 | F4 | Bancos y conciliación | ⏳ |
@@ -48,6 +48,28 @@ en `dte-service/src/auth/permissions.ts` y el frontend los consulta en
 Un usuario desactivado o una empresa suspendida pierden acceso de inmediato
 (el middleware verifica el estado con un cache de 30 s).
 
+## Núcleo contable (F1) — migración 006
+
+Esquema `accounting`:
+
+| Tabla | Para qué |
+|---|---|
+| `accounts` | Catálogo de cada empresa (código con puntos, guiones o solo dígitos; padre por prefijo) |
+| `role_definitions` / `account_roles` | Funciones contables (IVA débito, clientes, banco…) → cuenta de la empresa |
+| `journal_entries` / `journal_lines` | Asientos. Cuadre al COMMIT, inmutables una vez contabilizados |
+| `periods` | Cierre mensual: un mes cerrado no admite registros ni anulaciones |
+| `counters` | Numeración de asientos y documentos internos |
+
+Funciones clave: `create_entry` (idempotente por documento+evento),
+`reverse_entry` (reversión en la fecha original si el período sigue abierto),
+`reverse_source`, `save_manual_entry` / `post_manual_entry`,
+`import_accounts`, `account_movements`, `account_ledger`.
+
+Pantallas: Asientos, Libros (diario, mayor, balanza), Catálogo (importación
+CSV con vista previa), Períodos, Configuración contable. Una empresa nueva:
+1) importa su catálogo, 2) asigna las cuentas por función, 3) registra sus
+saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
+
 ## Convenciones del backend
 
 - Los módulos nuevos viven en `dte-service/src/erp/` y se registran como
@@ -59,6 +81,9 @@ Un usuario desactivado o una empresa suspendida pierden acceso de inmediato
 - Errores de negocio se lanzan con `RAISE ... USING ERRCODE = '22023'` y el
   manejador global los devuelve como 400 con el mensaje en español.
 - Bodies validados con zod (`parse`).
+- Consultas con `q()` (src/erp/http.ts): BIGINT/NUMERIC llegan como number y
+  DATE como 'YYYY-MM-DD'. Las transacciones con `tx(fn, ctx)` fijan
+  `app.user_id` / `app.user_name` para la bitácora de asientos.
 
 ## Convenciones del frontend
 

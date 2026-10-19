@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { registerUserRoutes } from './users.routes.js';
+import { registerAccountingRoutes } from './accounting/routes.js';
 
 /**
  * Módulos ERP sobre la base multi-tenant: usuarios, contabilidad, CxC/CxP,
@@ -8,4 +9,5 @@ import { registerUserRoutes } from './users.routes.js';
  */
 export async function registerErpModules(app: FastifyInstance): Promise<void> {
   await registerUserRoutes(app);
+  await registerAccountingRoutes(app);
 }

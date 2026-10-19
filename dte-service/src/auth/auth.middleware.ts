@@ -18,7 +18,7 @@ import { hasPermission, type Permission } from './permissions.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
-    auth?: { userId: string; email: string; role: AuthClaims['role'] };
+    auth?: { userId: string; email: string; role: AuthClaims['role']; name?: string };
     tenantId?: number;
     tenantSlug?: string;
   }
@@ -67,6 +67,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
       return reply;
     }
     req.auth.role = status.role as AuthClaims['role'];
+    if (status.name) req.auth.name = status.name;
   }
 
   const claimTenantId = claims.tenant_id;
@@ -115,7 +116,7 @@ export function requireRole(...allowed: string[]) {
   };
 }
 
-interface AccountStatus { active: boolean | null; role: string; tenantStatus: string | null }
+interface AccountStatus { active: boolean | null; role: string; tenantStatus: string | null; name: string | null }
 const STATUS_TTL_MS = 30_000;
 const statusCache = new Map<string, { at: number; value: AccountStatus | null }>();
 
@@ -131,12 +132,12 @@ async function accountStatus(userId: string): Promise<AccountStatus | null> {
   let value: AccountStatus | null = null;
   try {
     // to_jsonb: tolera una base sin la columna `active` (migración 005 pendiente)
-    const res = await query<{ active: string | null; role: string; tenant_status: string | null }>(`
-      SELECT to_jsonb(u)->>'active' AS active, u.role, t.status AS tenant_status
+    const res = await query<{ active: string | null; role: string; tenant_status: string | null; full_name: string | null }>(`
+      SELECT to_jsonb(u)->>'active' AS active, u.role, t.status AS tenant_status, u.full_name
         FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id
        WHERE u.id = $1`, [userId]);
     const r = res.rows[0];
-    value = r ? { active: r.active === null ? null : r.active === 'true', role: r.role, tenantStatus: r.tenant_status } : null;
+    value = r ? { active: r.active === null ? null : r.active === 'true', role: r.role, tenantStatus: r.tenant_status, name: r.full_name } : null;
   } catch {
     value = null;   // sin DB (rutas legacy) → se confía en el JWT
   }

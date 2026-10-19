@@ -18,6 +18,11 @@ import { ConfiguracionPage } from '@/features/configuracion/ConfiguracionPage';
 import { AdminTenantsPage } from '@/features/admin/AdminTenantsPage';
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
 import { UsuariosPage } from '@/features/usuarios/UsuariosPage';
+import { CatalogoPage } from '@/features/accounting/pages/CatalogoPage';
+import { AsientosPage } from '@/features/accounting/pages/AsientosPage';
+import { LibrosPage } from '@/features/accounting/pages/LibrosPage';
+import { PeriodosPage } from '@/features/accounting/pages/PeriodosPage';
+import { ConfigContablePage } from '@/features/accounting/pages/ConfigContablePage';
 
 /**
  * App routes. La autenticación la maneja exclusivamente `<AuthGate>` (en
@@ -55,6 +60,14 @@ export function App() {
         <Route path="contabilidad/compras" element={<ContabilidadComprasPage />} />
         <Route path="contabilidad/ventas" element={<ContabilidadVentasPage />} />
         <Route path="contabilidad/inteligencia" element={<InteligenciaNegociosPage />} />
+        <Route path="contabilidad/catalogo" element={<CatalogoPage />} />
+        <Route path="contabilidad/asientos" element={<AsientosPage />} />
+        <Route path="contabilidad/libros" element={<Navigate to="/contabilidad/libros/diario" replace />} />
+        <Route path="contabilidad/libros/diario" element={<LibrosPage book="diario" />} />
+        <Route path="contabilidad/libros/mayor" element={<LibrosPage book="mayor" />} />
+        <Route path="contabilidad/libros/balanza" element={<LibrosPage book="balanza" />} />
+        <Route path="contabilidad/periodos" element={<PeriodosPage />} />
+        <Route path="contabilidad/configuracion" element={<ConfigContablePage />} />
         <Route path="contribuyentes" element={<ContribuyentesPage />} />
         <Route path="csv" element={<CsvPage />} />
         <Route path="configuracion" element={<ConfiguracionPage />} />
