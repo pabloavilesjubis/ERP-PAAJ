@@ -8,6 +8,8 @@ import { accApi } from '../api';
 import { accKeys, useAccounts } from '../hooks';
 import { AccountSelect } from '../components/AccountSelect';
 import type { RoleAssignment } from '../types';
+import { closingApi, type Signatories } from '../api';
+import { Field, Input } from '@/components/ui/Field';
 
 /**
  * Reglas de contabilización: qué cuenta del catálogo de ESTA empresa usa el
@@ -63,6 +65,35 @@ export function ConfigContablePage() {
             </div>
           </div>
         ))}
+        <SignatoriesCard editable={editable} />
+      </div>
+    </div>
+  );
+}
+
+function SignatoriesCard({ editable }: { editable: boolean }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['acc', 'company'], queryFn: closingApi.company });
+  const [form, setForm] = useState<Signatories | null>(null);
+  useEffect(() => { if (q.data) setForm(q.data.signatories); }, [q.data]);
+  const save = useMutation({ mutationFn: () => closingApi.saveSignatories(form!), onSuccess: () => void qc.invalidateQueries({ queryKey: ['acc', 'company'] }) });
+  if (!form) return null;
+  const f = (k: keyof Signatories) => ({ value: form[k] ?? '', disabled: !editable, onChange: (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value }) });
+  return (
+    <div className="tax-card">
+      <div className="tax-card-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span>Firmantes de los estados financieros</span>
+        {editable && <Button onClick={() => save.mutate()} disabled={save.isPending}>Guardar firmantes</Button>}
+      </div>
+      <ErrorBanner error={save.error} />
+      {save.isSuccess && <div className="banner banner-success" style={{ marginBottom: 12 }}>Firmantes guardados.</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <Field label="Representante legal"><Input {...f('legal_rep_name')} /></Field>
+        <Field label="Cargo del representante"><Input {...f('legal_rep_title')} /></Field>
+        <Field label="Contador"><Input {...f('accountant_name')} /></Field>
+        <Field label="Inscripción del contador (CVPCPA)"><Input {...f('accountant_license')} /></Field>
+        <Field label="Auditor externo"><Input {...f('auditor_name')} /></Field>
+        <Field label="Inscripción del auditor"><Input {...f('auditor_license')} /></Field>
       </div>
     </div>
   );

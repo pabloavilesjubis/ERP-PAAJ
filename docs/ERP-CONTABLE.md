@@ -8,7 +8,7 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 | F0 | Fundaciones: roles y permisos, usuarios por empresa, migraciones, tests, CI | ✅ |
 | F1 | Núcleo contable: catálogo, asientos, partidas, períodos, diario, mayor, balanza | ✅ |
 | F2 | Ventas/compras contabilizadas, CxC y CxP | ✅ |
-| F3 | Estados financieros y cierres | ⏳ |
+| F3 | Estados financieros y cierres | ✅ |
 | F4 | Bancos y conciliación | ⏳ |
 | F5 | Planillas | ⏳ |
 | F6 | Posición fiscal, DTEs recibidos, importaciones, activos fijos | ⏳ |
@@ -95,6 +95,24 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
   con la cuenta de control.
 - Pantallas: Finanzas → Cuentas por cobrar / por pagar (saldos, documentos,
   antigüedad, cobros/pagos) y Contabilidad → Ventas y compras.
+
+## Estados financieros y cierre anual (F3) — migración 008
+
+- Estados (NIIF para las PYMES) calculados en `src/features/accounting/statements.ts`
+  a partir de `account_movements`: situación financiera (comparativo inicio/fin),
+  resultados (comparativo con el año anterior), cambios en el patrimonio y flujo
+  de efectivo (método indirecto). La clasificación usa el **tipo** de cuenta
+  (no códigos fijos) y corriente/no corriente explícito o deducido del nombre
+  del grupo ("ACTIVO CORRIENTE"). `accounts.cash_flow` permite forzar la
+  actividad de una cuenta en el flujo.
+- Impresión/PDF con estilos de impresión y exportación a Excel
+  (`write-excel-file`, carga bajo demanda). Encabezado con NIT/NRC de la empresa
+  y firmas (representante legal, contador con inscripción, auditor).
+- **Cierre del ejercicio**: `close_year` registra la partida de cierre al 31/12
+  contra «Utilidad del ejercicio», opcionalmente el traslado a utilidades
+  acumuladas el 1/1 y cierra los 12 meses. Exige años anteriores cerrados, sin
+  borradores ni ventas/compras con error. `reopen_year` revierte todo.
+  Los estados de resultados excluyen las partidas de cierre/traslado.
 
 ## Convenciones del backend
 

@@ -14,6 +14,7 @@ const qs = (p: Record<string, string | number | undefined | null>) => {
 export interface AccountInput {
   code: string; name: string; account_type: string; nature?: string; parent_id?: number | null;
   balance_term?: string | null; result_section?: string | null; allows_movements: boolean; is_active: boolean;
+  cash_flow?: string | null;
 }
 
 export interface ImportRow {
@@ -125,4 +126,23 @@ export const subApi = {
   voidPayment: (kind: SubKind, id: number, reason: string) => api.post<{ success: boolean }>(`/v2/acc/${kind}/payments/${id}/void`, { reason }),
   check: (kind: SubKind, as_of?: string) =>
     api.get<{ as_of: string; ledger: number; subledger: number; advances: number; difference: number }>(`/v2/acc/${kind}/check${qs({ as_of })}`),
+};
+
+export interface FiscalYear {
+  year: number; status: 'abierto' | 'cerrado'; result: number | null;
+  closing_entry_id: number | null; transfer_entry_id: number | null; closing_entry_number: number | null; transfer_entry_number: number | null;
+  closed_at: string | null; closed_by: string | null; reopened_at: string | null; reopened_by: string | null; notes: string | null;
+}
+export interface Signatories {
+  legal_rep_name: string | null; legal_rep_title: string | null; accountant_name: string | null; accountant_license: string | null;
+  auditor_name: string | null; auditor_license: string | null;
+}
+
+export const closingApi = {
+  years: () => api.get<{ items: FiscalYear[] }>('/v2/acc/fiscal-years').then(r => r.items),
+  preview: (year: number) => api.get<{ year: number; result: number; accounts: number; issues: string[] }>(`/v2/acc/fiscal-years/${year}/preview`),
+  close: (year: number, transfer: boolean) => api.post<{ result: number }>(`/v2/acc/fiscal-years/${year}/close`, { transfer }),
+  reopen: (year: number, reason: string) => api.post<{ success: boolean }>(`/v2/acc/fiscal-years/${year}/reopen`, { reason }),
+  company: () => api.get<{ nombre_legal: string; nit: string | null; nrc: string | null; signatories: Signatories }>('/v2/acc/company'),
+  saveSignatories: (b: Signatories) => api.put<{ success: boolean }>('/v2/acc/signatories', b),
 };

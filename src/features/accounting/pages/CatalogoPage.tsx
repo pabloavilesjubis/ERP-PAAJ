@@ -153,6 +153,7 @@ function AccountForm({ editing, accounts, onClose }: { editing: NonNullable<Edit
     result_section: base?.result_section ?? null,
     allows_movements: base?.allows_movements ?? true,
     is_active: base?.is_active ?? true,
+    cash_flow: base?.cash_flow ?? null,
   });
   const save = useMutation({
     mutationFn: async (): Promise<unknown> => base ? accApi.updateAccount(base.id, form) : accApi.createAccount(form),
@@ -212,6 +213,17 @@ function AccountForm({ editing, accounts, onClose }: { editing: NonNullable<Edit
           </Select>
         </Field>
       </div>
+      {!['Ingreso', 'Costo', 'Gasto', 'Resultado'].includes(form.account_type) && (
+        <Field label="Flujo de efectivo">
+          <Select value={form.cash_flow ?? ''} onChange={e => set('cash_flow', e.target.value || null)}>
+            <option value="">Automático (según tipo y clasificación)</option>
+            <option value="efectivo">Es efectivo (caja / bancos)</option>
+            <option value="operacion">Actividades de operación</option>
+            <option value="inversion">Actividades de inversión</option>
+            <option value="financiamiento">Actividades de financiamiento</option>
+          </Select>
+        </Field>
+      )}
       <label style={{ fontSize: 'var(--text-sm)', display: 'flex', gap: 6, alignItems: 'center' }}>
         <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} /> Cuenta activa
       </label>

@@ -11,6 +11,7 @@ import { accApi } from '../api';
 import { accKeys } from '../hooks';
 import { MONTHS_ES } from '../format';
 import type { PeriodRow } from '../types';
+import { YearClose } from '../components/YearClose';
 
 /** Cierre mensual: un mes cerrado no admite registros con esa fecha (ni automáticos ni manuales). */
 export function PeriodosPage() {
@@ -61,6 +62,7 @@ export function PeriodosPage() {
           ))}
         </div>
       )}
+      <YearClose />
       {action && (
         <Modal
           title={`${action.kind === 'close' ? 'Cerrar' : 'Reabrir'} ${MONTHS_ES[action.p.month - 1]} ${year}`}

@@ -28,6 +28,7 @@ const AccountBody = z.object({
   result_section: z.string().trim().max(80).nullable().optional(),
   allows_movements: z.boolean().default(true),
   is_active: z.boolean().default(true),
+  cash_flow: z.enum(['efectivo', 'operacion', 'inversion', 'financiamiento']).nullable().optional(),
 });
 
 const ImportBody = z.object({
@@ -96,7 +97,7 @@ export async function registerAccountingRoutes(app: FastifyInstance): Promise<vo
       const { tenantId } = ctx(req);
       const res = await q(`
         SELECT a.id, a.code, a.name, a.account_type, a.nature, a.parent_id, a.level, a.financial_statement,
-               a.affects_result, a.result_section, a.balance_term, a.allows_movements, a.is_active,
+               a.affects_result, a.result_section, a.balance_term, a.allows_movements, a.is_active, a.cash_flow,
                EXISTS (SELECT 1 FROM accounting.journal_lines l WHERE l.account_id = a.id) AS has_movements
           FROM accounting.accounts a
          WHERE a.tenant_id = $1
@@ -110,10 +111,10 @@ export async function registerAccountingRoutes(app: FastifyInstance): Promise<vo
       const fs = ER_TYPES.has(b.account_type) ? 'ER' : 'Balance';
       const res = await q<{ id: number }>(`
         INSERT INTO accounting.accounts (tenant_id, code, name, account_type, nature, parent_id, financial_statement,
-                                         affects_result, result_section, balance_term, allows_movements, is_active, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+                                         affects_result, result_section, balance_term, allows_movements, is_active, created_by, cash_flow)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
         [c.tenantId, b.code, b.name, b.account_type, b.nature ?? defaultNature(b.account_type), b.parent_id ?? null,
-         fs, fs === 'ER', b.result_section ?? null, b.balance_term ?? null, b.allows_movements, b.is_active, c.userId]);
+         fs, fs === 'ER', b.result_section ?? null, b.balance_term ?? null, b.allows_movements, b.is_active, c.userId, b.cash_flow ?? null]);
       return { id: res.rows[0]!.id };
     });
 
@@ -125,10 +126,10 @@ export async function registerAccountingRoutes(app: FastifyInstance): Promise<vo
       const res = await q(`
         UPDATE accounting.accounts SET code = $3, name = $4, account_type = $5, nature = $6, parent_id = $7,
                financial_statement = $8, affects_result = $9, result_section = $10, balance_term = $11,
-               allows_movements = $12, is_active = $13
+               allows_movements = $12, is_active = $13, cash_flow = $14
          WHERE id = $1 AND tenant_id = $2 RETURNING id`,
         [id, c.tenantId, b.code, b.name, b.account_type, b.nature ?? defaultNature(b.account_type), b.parent_id ?? null,
-         fs, fs === 'ER', b.result_section ?? null, b.balance_term ?? null, b.allows_movements, b.is_active]);
+         fs, fs === 'ER', b.result_section ?? null, b.balance_term ?? null, b.allows_movements, b.is_active, b.cash_flow ?? null]);
       if (!res.rows.length) throw new ValidationError('Cuenta no encontrada');
       return { success: true };
     });
@@ -322,9 +323,11 @@ export async function registerAccountingRoutes(app: FastifyInstance): Promise<vo
     // ── Reportes / libros ────────────────────────────────────────────────────
     r.get('/v2/acc/reports/movements', { preHandler: requirePerm('accounting:view') }, async (req) => {
       const { tenantId } = ctx(req);
-      const { from, to } = dateRange(req.query as Record<string, unknown>);
-      const res = await q(`SELECT account_id, debit_before::float8, credit_before::float8, debit::float8, credit::float8
-                                 FROM accounting.account_movements($1, $2, $3)`, [tenantId, from, to]);
+      const qp = req.query as Record<string, unknown>;
+      const { from, to } = dateRange(qp);
+      // exclude_closing=1: el estado de resultados de un año cerrado no se anula con su partida de cierre
+      const res = await q(`SELECT account_id, debit_before, credit_before, debit, credit
+                             FROM accounting.account_movements($1, $2, $3, $4)`, [tenantId, from, to, qp.exclude_closing === '1']);
       return { from, to, items: res.rows };
     });
 
@@ -429,6 +432,78 @@ export async function registerAccountingRoutes(app: FastifyInstance): Promise<vo
       if (!res.rows.length) throw new ValidationError('Ese período no está cerrado');
       await q(`INSERT INTO audit_events (tenant_id, user_id, event_type, payload) VALUES ($1, $2, 'PERIOD_REOPENED', $3::jsonb)`,
         [c.tenantId, c.userId, JSON.stringify(b)]);
+      return { success: true };
+    });
+
+    // ── Empresa y firmantes (encabezado y pie de los estados financieros) ────
+    r.get('/v2/acc/company', { preHandler: requirePerm('accounting:view') }, async (req) => {
+      const c = ctx(req);
+      const t = await q(`SELECT t.nombre_legal, t.nombre_comercial, e.mh_nit AS nit, e.emisor_nrc AS nrc, e.emisor_desc_actividad AS actividad
+                           FROM public.tenants t LEFT JOIN public.tenant_emisor e ON e.tenant_id = t.id WHERE t.id = $1`, [c.tenantId]);
+      const s = await tx(db => q(`SELECT legal_rep_name, legal_rep_title, accountant_name, accountant_license, auditor_name, auditor_license
+                                    FROM accounting.get_settings($1)`, [c.tenantId], db), c);
+      return { ...t.rows[0], signatories: s.rows[0] };
+    });
+
+    r.put('/v2/acc/signatories', { preHandler: requirePerm('accounting:config') }, async (req) => {
+      const c = ctx(req);
+      const opt = z.string().trim().max(120).nullable().optional();
+      const b = parse(z.object({ legal_rep_name: opt, legal_rep_title: opt, accountant_name: opt, accountant_license: opt,
+                                 auditor_name: opt, auditor_license: opt }), req.body);
+      await tx(async (db) => {
+        await q('SELECT accounting.get_settings($1)', [c.tenantId], db);
+        await q(`UPDATE accounting.settings SET legal_rep_name = $2, legal_rep_title = $3, accountant_name = $4, accountant_license = $5,
+                        auditor_name = $6, auditor_license = $7, updated_at = NOW(), updated_by = $8 WHERE tenant_id = $1`,
+          [c.tenantId, b.legal_rep_name || null, b.legal_rep_title || null, b.accountant_name || null, b.accountant_license || null,
+           b.auditor_name || null, b.auditor_license || null, c.userName], db);
+      }, c);
+      return { success: true };
+    });
+
+    // ── Cierre del ejercicio ─────────────────────────────────────────────────
+    r.get('/v2/acc/fiscal-years', { preHandler: requirePerm('accounting:view') }, async (req) => {
+      const { tenantId } = ctx(req);
+      const res = await q(`
+        WITH years AS (
+          SELECT DISTINCT extract(year FROM entry_date)::int AS year FROM accounting.journal_entries WHERE tenant_id = $1
+          UNION SELECT year FROM accounting.fiscal_years WHERE tenant_id = $1
+          UNION SELECT extract(year FROM now())::int
+        )
+        SELECT y.year, coalesce(f.status, 'abierto') AS status, f.result, f.closing_entry_id, f.transfer_entry_id,
+               ce.entry_number AS closing_entry_number, te.entry_number AS transfer_entry_number,
+               f.closed_at, f.closed_by, f.reopened_at, f.reopened_by, f.notes
+          FROM years y
+          LEFT JOIN accounting.fiscal_years f ON f.tenant_id = $1 AND f.year = y.year
+          LEFT JOIN accounting.journal_entries ce ON ce.id = f.closing_entry_id
+          LEFT JOIN accounting.journal_entries te ON te.id = f.transfer_entry_id
+         ORDER BY y.year DESC`, [tenantId]);
+      return { items: res.rows };
+    });
+
+    r.get('/v2/acc/fiscal-years/:year/preview', { preHandler: requirePerm('accounting:view') }, async (req) => {
+      const { tenantId } = ctx(req);
+      const year = idParam(req, 'year');
+      const res = await q<{ p: unknown }>('SELECT accounting.year_close_preview($1, $2) AS p', [tenantId, year]);
+      return res.rows[0]!.p;
+    });
+
+    r.post('/v2/acc/fiscal-years/:year/close', { preHandler: requirePerm('accounting:close') }, async (req) => {
+      const c = ctx(req);
+      const year = idParam(req, 'year');
+      const b = parse(z.object({ transfer: z.boolean().default(false) }), req.body);
+      const res = await tx(db => q<{ r: unknown }>('SELECT accounting.close_year($1, $2, $3) AS r', [c.tenantId, year, b.transfer], db), c);
+      await q(`INSERT INTO audit_events (tenant_id, user_id, event_type, payload) VALUES ($1, $2, 'YEAR_CLOSED', $3::jsonb)`,
+        [c.tenantId, c.userId, JSON.stringify({ year, ...(res.rows[0]!.r as object) })]);
+      return res.rows[0]!.r;
+    });
+
+    r.post('/v2/acc/fiscal-years/:year/reopen', { preHandler: requirePerm('accounting:close') }, async (req) => {
+      const c = ctx(req);
+      const year = idParam(req, 'year');
+      const b = parse(z.object({ reason: z.string().trim().min(3, 'Indica el motivo de la reapertura') }), req.body);
+      await tx(db => q('SELECT accounting.reopen_year($1, $2, $3)', [c.tenantId, year, b.reason], db), c);
+      await q(`INSERT INTO audit_events (tenant_id, user_id, event_type, payload) VALUES ($1, $2, 'YEAR_REOPENED', $3::jsonb)`,
+        [c.tenantId, c.userId, JSON.stringify({ year, reason: b.reason })]);
       return { success: true };
     });
   });

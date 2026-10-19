@@ -14,6 +14,7 @@ export interface Account {
   balance_term: 'corriente' | 'no_corriente' | null;
   allows_movements: boolean;
   is_active: boolean;
+  cash_flow?: 'efectivo' | 'operacion' | 'inversion' | 'financiamiento' | null;
   has_movements?: boolean;
 }
 
