@@ -11,14 +11,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "db:migrate":      "node dist/src/db/migrate.js",
-    "db:migrate:dev":  "tsx  src/db/migrate.ts",
-    "paaj:migrate":      "node dist/src/scripts/migrate-paaj.js",
-    "paaj:migrate:dry":  "node dist/src/scripts/migrate-paaj.js --dry-run",
+    "db:migrate": "node dist/src/db/migrate.js",
+    "db:migrate:dev": "tsx  src/db/migrate.ts",
+    "paaj:migrate": "node dist/src/scripts/migrate-paaj.js",
+    "paaj:migrate:dry": "node dist/src/scripts/migrate-paaj.js --dry-run",
     "paaj:migrate:full": "node dist/src/scripts/migrate-paaj.js --import-dtes",
-    "paaj:migrate:dev":  "tsx  src/scripts/migrate-paaj.ts",
-    "reset-admin":     "node dist/src/scripts/reset-admin-password.js",
-    "reset-admin:dev": "tsx  src/scripts/reset-admin-password.ts"
+    "paaj:migrate:dev": "tsx  src/scripts/migrate-paaj.ts",
+    "reset-admin": "node dist/src/scripts/reset-admin-password.js",
+    "reset-admin:dev": "tsx  src/scripts/reset-admin-password.ts",
+    "test:db": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://postgres:test@127.0.0.1:55432/erp_test} vitest run",
+    "test:db:up": "docker run -d --name erp-acct-test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=erp_test -p 127.0.0.1:55432:5432 postgres:16-alpine"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

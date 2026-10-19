@@ -81,8 +81,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const { email, password } = parsed.data;
     const lc = email.toLowerCase();
 
-    const res = await query<UserRow>(
-      'SELECT id, email, password_hash, tenant_id, role, full_name FROM users WHERE LOWER(email) = $1',
+    const res = await query<UserRow & { active: string | null }>(
+      `SELECT id, email, password_hash, tenant_id, role, full_name, to_jsonb(users)->>'active' AS active
+         FROM users WHERE LOWER(email) = $1`,
       [lc],
     );
     const user = res.rows[0];
@@ -91,6 +92,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const ok = await verifyPassword(password, hashToCheck);
     if (!user || !ok) {
       return reply.code(401).send({ success: false, code: 'INVALID_CREDENTIALS', message: 'Credenciales inválidas' });
+    }
+    if (user.active === 'false') {
+      return reply.code(401).send({ success: false, code: 'USER_INACTIVE', message: 'Tu usuario está desactivado. Consulta al administrador de tu empresa.' });
     }
 
     await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);

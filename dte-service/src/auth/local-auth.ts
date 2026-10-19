@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'node:crypto';
+import type { Role } from './permissions.js';
 
 /**
  * Auth local — bcrypt para passwords + JWT firmado por el mismo backend.
@@ -10,7 +11,7 @@ import { randomBytes } from 'node:crypto';
  *   sub:        user_id (text)
  *   email:      string
  *   tenant_id:  number | null  (null mientras no completó onboarding)
- *   role:       'admin' | 'cajero' | 'contador' | 'viewer'
+ *   role:       ver ROLES en permissions.ts
  *   exp:        unix seconds
  *   iat:        unix seconds
  */
@@ -22,7 +23,7 @@ export interface AuthClaims {
   sub: string;
   email: string;
   tenant_id: number | null;
-  role: 'admin' | 'cajero' | 'contador' | 'viewer';
+  role: Role;
   iat: number;
   exp: number;
 }

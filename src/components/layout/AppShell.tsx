@@ -7,6 +7,8 @@ import { useDataStore } from '@/stores/data.store';
 import { isSupabaseConfigured } from '@/config/env';
 import { useBranding } from '@/branding/BrandingProvider';
 import { usePlatformAdmin } from '@/admin/usePlatformAdmin';
+import { usePermissions } from '@/auth/usePermissions';
+import type { IconProps } from '@/components/icons/Icon';
 import { useAuth, signOut as saasSignOut } from '@/auth/useAuth';
 
 /**
@@ -41,7 +43,18 @@ function ProductLogo() {
   );
 }
 
-const NAV = [
+interface NavItem {
+  to: string;
+  icon: IconProps['name'];
+  label: string;
+  section: string;
+  end?: boolean;
+  adminOnly?: boolean;
+  /** Permiso del rol requerido para verlo (ver usePermissions). */
+  perm?: string;
+}
+
+const NAV: NavItem[] = [
   { to: '/', icon: 'home', label: 'Resumen fiscal', section: 'Declaración mensual', end: true },
   { to: '/facturacion', icon: 'plus', label: 'Facturación (POS)', section: 'Operación diaria' },
   { to: '/consumidor', icon: 'receipt', label: 'Ventas consumidor', section: 'Declaración mensual' },
@@ -53,8 +66,9 @@ const NAV = [
   { to: '/contribuyentes', icon: 'users', label: 'Contribuyentes', section: 'Catálogos' },
   { to: '/csv', icon: 'download', label: 'CSV / Plantillas', section: 'Datos' },
   { to: '/configuracion', icon: 'edit', label: 'Configuración', section: 'Ajustes' },
+  { to: '/usuarios', icon: 'shield', label: 'Usuarios', section: 'Ajustes', perm: 'users:manage' },
   { to: '/admin/tenants', icon: 'building', label: 'Tenants', section: 'Plataforma', adminOnly: true },
-] as const;
+];
 
 const TITLES: Record<string, string> = {
   '/': 'Resumen fiscal',
@@ -68,8 +82,18 @@ const TITLES: Record<string, string> = {
   '/contribuyentes': 'Contribuyentes',
   '/csv': 'Importar / Exportar CSV',
   '/configuracion': 'Configuración',
+  '/usuarios': 'Usuarios de la empresa',
   '/admin/tenants': 'Tenants — Administración de plataforma',
 };
+
+/** Título por la ruta más específica que coincida (los módulos tienen subrutas). */
+function titleFor(pathname: string): string {
+  if (TITLES[pathname]) return TITLES[pathname]!;
+  const match = Object.keys(TITLES)
+    .filter(k => k !== '/' && pathname.startsWith(k + '/'))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? TITLES[match]! : 'ERP';
+}
 
 export function AppShell() {
   const location = useLocation();
@@ -84,7 +108,8 @@ export function AppShell() {
   const signOut = signOutSaas ?? legacyAuth.signOut;
 
   const isPlatformAdmin = usePlatformAdmin();
-  const visibleNav = NAV.filter(n => !('adminOnly' in n && n.adminOnly) || isPlatformAdmin);
+  const { can } = usePermissions();
+  const visibleNav = NAV.filter(n => (!n.adminOnly || isPlatformAdmin) && (!n.perm || can(n.perm)));
   const sections = Array.from(new Set(visibleNav.map(n => n.section)));
 
   return (
@@ -100,10 +125,10 @@ export function AppShell() {
               <NavLink
                 key={n.to}
                 to={n.to}
-                end={'end' in n ? n.end : false}
+                end={n.end ?? false}
                 className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
               >
-                <Icon name={n.icon as never} size={18} className="nav-icon" />
+                <Icon name={n.icon} size={18} className="nav-icon" />
                 {n.label}
               </NavLink>
             ))}
@@ -121,7 +146,7 @@ export function AppShell() {
 
       <div className="main-area">
         <header className="topbar">
-          <div className="topbar-title">{TITLES[location.pathname] ?? 'ERP'}</div>
+          <div className="topbar-title">{titleFor(location.pathname)}</div>
           <div className="month-selector">
             <Icon name="calendar" size={16} style={{ color: 'var(--fg-3)' }} />
             <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', overflow: 'hidden' }}>

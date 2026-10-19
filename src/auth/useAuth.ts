@@ -18,7 +18,7 @@ export interface AuthUser {
   id: string;
   email: string;
   tenant_id: number | null;
-  role: 'admin' | 'cajero' | 'contador' | 'viewer';
+  role: 'admin' | 'contador' | 'auxiliar' | 'rrhh' | 'cajero' | 'viewer';
   full_name: string | null;
 }
 

@@ -6,5 +6,8 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     globals: false,
     pool: 'threads',
+    // Prepara la base de integración (si TEST_DATABASE_URL está definida).
+    globalSetup: ['tests/integration/global-setup.ts'],
+    testTimeout: 20_000,
   },
 });

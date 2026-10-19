@@ -17,6 +17,7 @@ import { FacturacionPage } from '@/features/facturacion/FacturacionPage';
 import { ConfiguracionPage } from '@/features/configuracion/ConfiguracionPage';
 import { AdminTenantsPage } from '@/features/admin/AdminTenantsPage';
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
+import { UsuariosPage } from '@/features/usuarios/UsuariosPage';
 
 /**
  * App routes. La autenticación la maneja exclusivamente `<AuthGate>` (en
@@ -57,6 +58,7 @@ export function App() {
         <Route path="contribuyentes" element={<ContribuyentesPage />} />
         <Route path="csv" element={<CsvPage />} />
         <Route path="configuracion" element={<ConfiguracionPage />} />
+        <Route path="usuarios" element={<UsuariosPage />} />
         <Route path="admin/tenants" element={<AdminTenantsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

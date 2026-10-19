@@ -1,6 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { verifyJwt, type AuthClaims } from './local-auth.js';
 import { getTenantBySlug } from '../tenants/tenant.repo.js';
+import { query } from '../db/client.js';
+import { isPlatformAdmin } from './platform-admin.js';
+import { hasPermission, type Permission } from './permissions.js';
 
 /**
  * Middleware: extrae JWT del header `Authorization: Bearer …`, lo verifica con
@@ -50,6 +53,22 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
   }
   req.auth = { userId: claims.sub, email: claims.email, role: claims.role };
 
+  // Estado vigente del usuario y su empresa (cache corto): un usuario
+  // desactivado o una empresa suspendida pierden acceso sin esperar a que
+  // venza el JWT, y un cambio de rol aplica de inmediato.
+  const status = await accountStatus(claims.sub);
+  if (status) {
+    if (status.active === false) {
+      reply.code(401).send({ success: false, code: 'USER_INACTIVE', message: 'Usuario desactivado' });
+      return reply;
+    }
+    if (status.tenantStatus && ['suspended', 'archived'].includes(status.tenantStatus) && !isPlatformAdmin(claims.email)) {
+      reply.code(403).send({ success: false, code: 'TENANT_SUSPENDED', message: 'La empresa está suspendida' });
+      return reply;
+    }
+    req.auth.role = status.role as AuthClaims['role'];
+  }
+
   const claimTenantId = claims.tenant_id;
   const pathSlug = extractSlugFromPath(req);
 
@@ -92,6 +111,56 @@ export function requireRole(...allowed: string[]) {
         success: false, code: 'ROLE_FORBIDDEN',
         message: `Rol requerido: ${allowed.join('|')}, actual: ${req.auth?.role ?? 'none'}`,
       });
+    }
+  };
+}
+
+interface AccountStatus { active: boolean | null; role: string; tenantStatus: string | null }
+const STATUS_TTL_MS = 30_000;
+const statusCache = new Map<string, { at: number; value: AccountStatus | null }>();
+
+/** Limpia el cache de estado (al cambiar rol/activo de un usuario). */
+export function invalidateAccountStatus(userId?: string): void {
+  if (userId) statusCache.delete(userId);
+  else statusCache.clear();
+}
+
+async function accountStatus(userId: string): Promise<AccountStatus | null> {
+  const hit = statusCache.get(userId);
+  if (hit && Date.now() - hit.at < STATUS_TTL_MS) return hit.value;
+  let value: AccountStatus | null = null;
+  try {
+    // to_jsonb: tolera una base sin la columna `active` (migración 005 pendiente)
+    const res = await query<{ active: string | null; role: string; tenant_status: string | null }>(`
+      SELECT to_jsonb(u)->>'active' AS active, u.role, t.status AS tenant_status
+        FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id
+       WHERE u.id = $1`, [userId]);
+    const r = res.rows[0];
+    value = r ? { active: r.active === null ? null : r.active === 'true', role: r.role, tenantStatus: r.tenant_status } : null;
+  } catch {
+    value = null;   // sin DB (rutas legacy) → se confía en el JWT
+  }
+  statusCache.set(userId, { at: Date.now(), value });
+  return value;
+}
+
+/**
+ * preHandler para rutas que ya pasaron por requireAuth: exige un permiso del
+ * rol (ver permissions.ts). Uso: `{ preHandler: requirePerm('accounting:post') }`.
+ */
+export function requirePerm(...perms: Permission[]) {
+  return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!req.auth) {
+      await requireAuth(req, reply);
+      if (reply.sent) return;
+    }
+    const role = req.auth?.role;
+    if (!perms.every(p => hasPermission(role, p))) {
+      reply.code(403).send({
+        success: false, code: 'PERMISSION_DENIED',
+        message: `Tu rol (${role ?? 'sin rol'}) no tiene permiso para esta acción (${perms.join(', ')})`,
+      });
+      return reply;
     }
   };
 }

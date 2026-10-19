@@ -4,11 +4,10 @@ import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import path from 'node:path';
 import { loadConfig } from './config.js';
-import { CorrelativoNotConfiguredError, CorrelativoNotSeededError, DteError, MhRejectedError, ValidationError } from './errors.js';
+import { errorHandler } from './http/error-handler.js';
 import { registerRoutes } from './routes.js';
 import { registerBeonRoutes } from './beon/routes.js';
 import { Storage } from './beon/storage.js';
-import { MailerNotConfigured } from './beon/mailer.js';
 
 const cfg = loadConfig();
 
@@ -75,6 +74,9 @@ await app.register(cors, {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 });
 
+// Antes de registrar rutas: los plugins encapsulados heredan este handler.
+app.setErrorHandler(errorHandler);
+
 // Storage inicializado antes de registrar rutas
 const storage = new Storage(cfg.STORAGE_DIR);
 await storage.init();
@@ -112,78 +114,17 @@ if (process.env.DATABASE_URL) {
   const { registerV2EntityRoutes } = await import('./v2/entity.routes.js');
   const { registerAdminRoutes } = await import('./v2/admin.routes.js');
   const { registerDocRoutes } = await import('./v2/doc.routes.js');
+  const { registerErpModules } = await import('./erp/index.js');
   registerAuthRoutes(app);
   registerV2Routes(app, cfg);
   registerOnboardingRoutes(app);
   registerV2EntityRoutes(app);
   registerAdminRoutes(app);
   registerDocRoutes(app, cfg);
+  await registerErpModules(app);
   app.log.info('v2 multi-tenant routes + auth local + onboarding + entity CRUD + admin activas');
 } else {
   app.log.warn('DATABASE_URL ausente — rutas v2 multi-tenant deshabilitadas');
-}
-
-app.setErrorHandler((rawErr, req, reply) => {
-  const err = rawErr as unknown as Error;
-  req.log.error({ err }, 'request failed');
-  if (err instanceof CorrelativoNotSeededError || err instanceof CorrelativoNotConfiguredError) {
-    // 422 (Unprocessable Entity) — el body es estructuralmente válido pero
-    // no existe correlativo fiscal inicial sembrado para el tipo. El caller
-    // debe sembrar explícitamente antes de volver a emitir.
-    return reply.code(422).send({ success: false, code: err.code, message: err.message, details: err.details });
-  }
-  if (err instanceof ValidationError) {
-    return reply.code(400).send({ success: false, code: err.code, message: err.message, details: err.details });
-  }
-  if (err instanceof MhRejectedError) {
-    return reply.code(422).send({
-      success: false,
-      code: err.code,
-      message: err.message,
-      mhMessage: err.mhMessage,
-      observaciones: err.observaciones,
-      details: err.details,
-    });
-  }
-  if (err instanceof MailerNotConfigured) {
-    return reply.code(503).send({ success: false, code: err.code, message: err.message });
-  }
-  if (err instanceof DteError) {
-    const status = err.code === 'MH_AUTH_FAILED' ? 502
-      : err.code === 'FIRMADOR_FAILED' ? 502
-      : err.code === 'MH_TRANSIENT' ? 503
-      : 500;
-    return reply.code(status).send({ success: false, code: err.code, message: err.message, details: err.details });
-  }
-  // Catch-all: surfaceamos el mensaje real para que el caller pueda
-  // diagnosticar sin entrar al contenedor. El stack lo dejamos solo en logs
-  // (req.log.error arriba ya lo capturó con redaction de tokens/JWS).
-  return reply.code(500).send({
-    success: false,
-    code: 'INTERNAL',
-    message: err.message || 'Error inesperado',
-    errorName: err.name,
-    // Stack frame top — útil para identificar el archivo/línea sin ver logs.
-    // No exponemos el stack completo para no filtrar paths internos.
-    where: extractTopFrame(err),
-  });
-});
-
-function extractTopFrame(err: Error): string | undefined {
-  const stack = err.stack;
-  if (!stack) return undefined;
-  const lines = stack.split('\n');
-  // Primera línea que apunte a código nuestro (src/dist), no a node_modules.
-  for (const line of lines) {
-    const m = line.match(/at\s+.+\((.+):(\d+):(\d+)\)/) ?? line.match(/at\s+(.+):(\d+):(\d+)/);
-    if (!m) continue;
-    const file = m[1];
-    if (file && !file.includes('node_modules') && (file.includes('/src/') || file.includes('/dist/'))) {
-      const idx = file.lastIndexOf('/');
-      return `${file.slice(idx + 1)}:${m[2]}:${m[3]}`;
-    }
-  }
-  return lines[1]?.trim();
 }
 
 try {
