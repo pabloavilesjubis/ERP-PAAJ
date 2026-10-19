@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { registerUserRoutes } from './users.routes.js';
+import { registerCompanyRoutes } from './company.routes.js';
 import { registerAccountingRoutes } from './accounting/routes.js';
 import { registerIntegrationRoutes } from './accounting/integration.routes.js';
 import { registerSubledgerRoutes } from './accounting/subledger.routes.js';
@@ -17,6 +18,7 @@ import { registerAssetRoutes } from './assets/routes.js';
  */
 export async function registerErpModules(app: FastifyInstance): Promise<void> {
   await registerUserRoutes(app);
+  await registerCompanyRoutes(app);
   await registerAccountingRoutes(app);
   await registerIntegrationRoutes(app);
   await registerSubledgerRoutes(app);

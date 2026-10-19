@@ -50,6 +50,18 @@ describe('getToken', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('cada empresa (NIT) tiene su propio token', async () => {
+    let n = 0;
+    vi.spyOn(global, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ status: 'OK', body: { token: `t${++n}` } }), { status: 200 })),
+    );
+    const a = await getToken(cfg);
+    const b = await getToken({ ...cfg, MH_NIT: '06149999999999' } as Config);
+    expect(a).toBe('Bearer t1');
+    expect(b).toBe('Bearer t2');
+    expect(await getToken(cfg)).toBe('Bearer t1');
+  });
+
   it('fuerza refresh con force=true', async () => {
     // mockImplementation crea una Response nueva por llamada — cada body es
     // de un solo uso, no se puede compartir un mismo Response entre dos calls.

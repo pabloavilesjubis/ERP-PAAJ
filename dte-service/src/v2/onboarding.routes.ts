@@ -1,14 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { ValidationError } from '../errors.js';
 import { requireAuth } from '../auth/auth.middleware.js';
+import { isPlatformAdmin } from '../auth/platform-admin.js';
+import { saveCert } from '../tenants/emisor.service.js';
 import { withTx, query } from '../db/client.js';
 import { encryptSecret } from '../auth/crypto.js';
 import * as correlativos from '../tenants/correlativo.repo.js';
-import { getToken } from '../mh/auth.js';
-import type { Config } from '../config.js';
+import { testCredentials } from '../mh/auth.js';
 
 interface MultipartField { type: 'field'; fieldname: string; value: unknown }
 interface MultipartFile { type: 'file'; fieldname: string; file: AsyncIterable<Uint8Array> }
@@ -108,9 +108,15 @@ export function registerOnboardingRoutes(app: FastifyInstance): void {
     if (!/^\d{14}$/.test(mhNit)) {
       throw new ValidationError('mh_nit debe ser 14 dígitos');
     }
-    await mkdir(FIRMADOR_CERTS_DIR, { recursive: true });
-    const certPath = path.join(FIRMADOR_CERTS_DIR, `${mhNit}.crt`);
-    await writeFile(certPath, buffer);
+    // Solo el super-admin de plataforma puede reemplazar el certificado de un NIT
+    // que ya pertenece a otra empresa.
+    if (!isPlatformAdmin(req.auth?.email)) {
+      const owner = await query<{ tenant_id: number }>('SELECT tenant_id FROM tenant_emisor WHERE mh_nit = $1', [mhNit]);
+      if (owner.rows.length && Number(owner.rows[0]!.tenant_id) !== req.tenantId) {
+        return reply.code(403).send({ success: false, code: 'FORBIDDEN', message: 'Ese NIT pertenece a otra empresa' });
+      }
+    }
+    const certPath = await saveCert(mhNit, buffer);
     req.log.info({ mh_nit: mhNit, certPath, size: buffer.length }, 'cert subido al firmador');
     return reply.send({ success: true, cert_path: certPath });
   });
@@ -124,13 +130,9 @@ export function registerOnboardingRoutes(app: FastifyInstance): void {
       throw new ValidationError('mh_env, mh_nit, mh_password requeridos');
     }
     try {
-      // Sintetizar un Config mínimo para getToken.
-      const fakeCfg = {
-        MH_ENV: body.mh_env, MH_NIT: body.mh_nit, MH_PASSWORD: body.mh_password,
-      } as unknown as Config;
-      const token = await getToken(fakeCfg, true);
+      await testCredentials(body.mh_env, body.mh_nit, body.mh_password);
       req.log.info({ mh_nit: body.mh_nit, mh_env: body.mh_env }, 'creds MH validadas');
-      return reply.send({ success: true, token_received: !!token });
+      return reply.send({ success: true, token_received: true });
     } catch (e) {
       return reply.code(400).send({
         success: false, code: 'MH_AUTH_FAILED',

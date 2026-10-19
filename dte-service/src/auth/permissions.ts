@@ -11,7 +11,7 @@ export const ROLES = ['admin', 'contador', 'auxiliar', 'rrhh', 'cajero', 'viewer
 export type Role = typeof ROLES[number];
 
 export const PERMISSIONS = [
-  'users:manage',
+  'users:manage', 'company:view', 'company:manage',
   'accounting:view', 'accounting:post', 'accounting:review', 'accounting:config', 'accounting:close',
   'receivables:view', 'receivables:manage',
   'payables:view', 'payables:manage',
@@ -26,8 +26,9 @@ const ALL: readonly Permission[] = PERMISSIONS;
 
 const BY_ROLE: Record<Role, readonly Permission[]> = {
   admin: ALL,
-  // El contador consulta planillas; las gestiona RRHH (o el admin)
-  contador: ALL.filter(p => p !== 'users:manage' && p !== 'payroll:manage' && p !== 'payroll:terminate'),
+  // El contador consulta planillas (las gestiona RRHH o el admin) y los datos de la
+  // empresa; las credenciales del MH y el certificado solo los maneja el admin
+  contador: ALL.filter(p => !['users:manage', 'company:manage', 'payroll:manage', 'payroll:terminate'].includes(p)),
   auxiliar: [
     'accounting:view', 'accounting:post',
     'receivables:view', 'receivables:manage',

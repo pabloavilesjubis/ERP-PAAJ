@@ -18,6 +18,7 @@ import { ConfiguracionPage } from '@/features/configuracion/ConfiguracionPage';
 import { PlataformaPage } from '@/features/admin/PlataformaPage';
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
 import { UsuariosPage } from '@/features/usuarios/UsuariosPage';
+import { MiEmpresaPage } from '@/features/empresa/MiEmpresaPage';
 import { CatalogoPage } from '@/features/accounting/pages/CatalogoPage';
 import { AsientosPage } from '@/features/accounting/pages/AsientosPage';
 import { LibrosPage } from '@/features/accounting/pages/LibrosPage';
@@ -103,6 +104,7 @@ export function App() {
         <Route path="cxp" element={<SubledgerPage key="cxp" kind="cxp" />} />
         <Route path="contribuyentes" element={<ContribuyentesPage />} />
         <Route path="csv" element={<CsvPage />} />
+        <Route path="mi-empresa" element={<MiEmpresaPage />} />
         <Route path="configuracion" element={<ConfiguracionPage />} />
         <Route path="usuarios" element={<UsuariosPage />} />
         <Route path="admin/tenants" element={<PlataformaPage />} />

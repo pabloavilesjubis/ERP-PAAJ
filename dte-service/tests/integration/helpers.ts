@@ -1,5 +1,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { errorHandler } from '../../src/http/error-handler.js';
 import { issueJwt } from '../../src/auth/local-auth.js';
 import type { Role } from '../../src/auth/permissions.js';
@@ -13,6 +16,7 @@ if (hasDb) {
 }
 process.env.AUTH_JWT_SECRET ??= 'test-secret-test-secret-test-secret';
 process.env.TENANT_SECRETS_KEY ??= Buffer.alloc(32, 7).toString('base64');
+process.env.FIRMADOR_CERTS_DIR = mkdtempSync(path.join(tmpdir(), 'erp-certs-'));
 
 export async function buildApp(): Promise<FastifyInstance> {
   const { registerErpModules } = await import('../../src/erp/index.js');

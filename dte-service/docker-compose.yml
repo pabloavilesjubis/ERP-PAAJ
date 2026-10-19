@@ -68,7 +68,7 @@ services:
       - "0.0.0.0:3000:3000"
     volumes:
       - dte-data:/app/data
-      - ./firmador/temp:/app/certs:ro     # acceso read-only a certs por tenant
+      - ./firmador/temp:/app/certs        # "Mi empresa" guarda aquí el <NIT>.crt de cada tenant (lo lee el firmador)
     depends_on:
       firmador:
         condition: service_started

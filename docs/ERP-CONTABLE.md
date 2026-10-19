@@ -45,8 +45,8 @@ en `dte-service/src/auth/permissions.ts` y el frontend los consulta en
 
 | Rol | Puede |
 |---|---|
-| admin | todo, incluida la gestión de usuarios |
-| contador | contabilidad completa, cierres, fiscal, bancos, CxC/CxP, activos; consulta planillas |
+| admin | todo, incluida la gestión de usuarios y de "Mi empresa" |
+| contador | contabilidad completa, cierres, fiscal, bancos, CxC/CxP, activos; consulta planillas y "Mi empresa" |
 | auxiliar | partidas, cobros, pagos, conciliaciones (no cierra ni configura) |
 | rrhh | planillas, empleados, liquidaciones |
 | cajero | facturación y ventas |
@@ -54,6 +54,21 @@ en `dte-service/src/auth/permissions.ts` y el frontend los consulta en
 
 Un usuario desactivado o una empresa suspendida pierden acceso de inmediato
 (el middleware verifica el estado con un cache de 30 s).
+
+## Mi empresa (`/mi-empresa`)
+
+El admin de cada empresa carga ahí sus datos generales, los datos fiscales del
+emisor (NIT, NRC, actividad, dirección, establecimiento), la clave API del MH y
+la del certificado (cifradas con `TENANT_SECRETS_KEY`), el certificado `.crt`
+y los correlativos de DTE; un checklist muestra qué falta para facturar.
+Backend: `dte-service/src/erp/company.routes.ts` (`/v2/company*`), con la
+lógica del emisor compartida con la consola de plataforma en
+`src/tenants/emisor.service.ts`. Un NIT no puede repetirse entre empresas.
+
+El certificado se escribe en `FIRMADOR_CERTS_DIR` (`/app/certs`), que en
+`docker-compose.yml` es `./firmador/temp` montado **con escritura** (lo lee el
+firmador como `/uploads`). Al desplegar hay que recrear el contenedor para que
+tome el montaje nuevo.
 
 ## Núcleo contable (F1) — migración 006
 

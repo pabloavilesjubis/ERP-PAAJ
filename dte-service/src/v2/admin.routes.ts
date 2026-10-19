@@ -1,14 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import path from 'node:path';
 import { invalidateAccountStatus, requireAuth } from '../auth/auth.middleware.js';
 import { isPlatformAdmin } from '../auth/platform-admin.js';
 import { query, withTx } from '../db/client.js';
-import { encryptSecret } from '../auth/crypto.js';
 import { hashPassword, newUserId, verifyPassword } from '../auth/local-auth.js';
 import { ROLES } from '../auth/permissions.js';
 import * as correlativos from '../tenants/correlativo.repo.js';
 import { ValidationError } from '../errors.js';
+import { EMISOR_COLS, EmisorInput, upsertEmisor } from '../tenants/emisor.service.js';
 
 /**
  * Consola de PLATAFORMA (super-admin). Crear y controlar tenants del SaaS.
@@ -24,31 +23,8 @@ import { ValidationError } from '../errors.js';
  *   PUT    /v2/admin/users/:id            — rol, nombre, activo
  *   POST   /v2/admin/users/:id/password   — nueva contraseña
  *
- * El cert .crt se sube aparte vía /v2/onboarding/cert (por NIT) ANTES de crear.
+ * El cert .crt se sube aparte vía /v2/onboarding/cert (por NIT).
  */
-
-const FIRMADOR_CERTS_DIR = process.env.FIRMADOR_CERTS_DIR ?? '/app/certs';
-
-const EmisorSchema = z.object({
-  mh_env: z.enum(['sandbox', 'production']),
-  mh_nit: z.string().regex(/^\d{14}$/),
-  mh_password: z.string().min(1),
-  firmador_password: z.string().min(1),
-  emisor_nrc: z.string().min(1),
-  emisor_nombre: z.string().min(1),
-  emisor_cod_actividad: z.string().min(1),
-  emisor_desc_actividad: z.string().min(1),
-  emisor_tipo_establecimiento: z.string().regex(/^\d{2}$/),
-  emisor_departamento: z.string().regex(/^\d{2}$/),
-  emisor_municipio: z.string().regex(/^\d{2}$/),
-  emisor_complemento: z.string().min(1),
-  emisor_telefono: z.string().nullable().optional(),
-  emisor_email: z.string().email(),
-  punto_venta_establecimiento: z.string().regex(/^[A-Z0-9]{4}$/),
-  punto_venta_punto: z.string().regex(/^[A-Z0-9]{4}$/),
-  emisor_cod_estable_mh: z.string().regex(/^[A-Z0-9]{4}$/).nullable().optional(),
-  emisor_cod_punto_venta_mh: z.string().regex(/^[A-Z0-9]{4}$/).nullable().optional(),
-});
 
 const CreateBody = z.object({
   tenant: z.object({
@@ -61,16 +37,12 @@ const CreateBody = z.object({
     password: z.string().min(8),
     full_name: z.string().nullable().optional(),
   }),
-  emisor: EmisorSchema.nullable().optional(),
+  emisor: EmisorInput.nullable().optional(),
   correlativos: z.array(z.object({
     tipo_dte: z.enum(['01', '03', '05', '14']),
     ultimo_consumido: z.number().int().min(0),
   })).default([]),
 });
-
-const EMISOR_COLS = ['mh_env', 'mh_nit', 'emisor_nrc', 'emisor_nombre', 'emisor_cod_actividad', 'emisor_desc_actividad',
-  'emisor_tipo_establecimiento', 'emisor_departamento', 'emisor_municipio', 'emisor_complemento', 'emisor_telefono', 'emisor_email',
-  'punto_venta_establecimiento', 'punto_venta_punto', 'emisor_cod_estable_mh', 'emisor_cod_punto_venta_mh'] as const;
 
 const tenantIdOf = (req: FastifyRequest) => {
   const id = parseInt((req.params as { id: string }).id, 10);
@@ -81,27 +53,6 @@ const tenantIdOf = (req: FastifyRequest) => {
 async function audit(tenantId: number | null, userId: string | undefined, event: string, payload: unknown): Promise<void> {
   await query(`INSERT INTO audit_events (tenant_id, user_id, event_type, payload) VALUES ($1, $2, $3, $4::JSONB)`,
     [tenantId, userId ?? null, event, JSON.stringify(payload)]);
-}
-
-async function insertEmisor(client: { query: typeof query }, tenantId: number, e: z.infer<typeof EmisorSchema>): Promise<void> {
-  await client.query(`
-    INSERT INTO tenant_emisor (
-      tenant_id, mh_env, mh_nit, mh_password_enc, firmador_password_enc, cert_path,
-      emisor_nrc, emisor_nombre, emisor_cod_actividad, emisor_desc_actividad,
-      emisor_tipo_establecimiento, emisor_departamento, emisor_municipio,
-      emisor_complemento, emisor_telefono, emisor_email,
-      punto_venta_establecimiento, punto_venta_punto,
-      emisor_cod_estable_mh, emisor_cod_punto_venta_mh
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-  `, [
-    tenantId, e.mh_env, e.mh_nit,
-    encryptSecret(e.mh_password), encryptSecret(e.firmador_password), path.join(FIRMADOR_CERTS_DIR, `${e.mh_nit}.crt`),
-    e.emisor_nrc, e.emisor_nombre, e.emisor_cod_actividad, e.emisor_desc_actividad,
-    e.emisor_tipo_establecimiento, e.emisor_departamento, e.emisor_municipio,
-    e.emisor_complemento, e.emisor_telefono ?? null, e.emisor_email,
-    e.punto_venta_establecimiento, e.punto_venta_punto,
-    e.emisor_cod_estable_mh ?? null, e.emisor_cod_punto_venta_mh ?? null,
-  ]);
 }
 
 /** Conteo de una tabla por tenant; 0 si la tabla no existe todavía (migraciones pendientes). */
@@ -198,7 +149,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         RETURNING id
       `, [b.tenant.slug, b.tenant.nombre_legal, b.tenant.nombre_comercial ?? null]);
       const newTenantId = tRes.rows[0]!.id;
-      if (b.emisor) await insertEmisor(client as unknown as { query: typeof query }, newTenantId, b.emisor);
+      if (b.emisor) await upsertEmisor(newTenantId, b.emisor, client);
       await client.query(`
         INSERT INTO users (id, email, password_hash, tenant_id, role, full_name)
         VALUES ($1, $2, $3, $4, 'admin', $5)
@@ -247,7 +198,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   // ── Datos fiscales (emisor) ─────────────────────────────────────────────────
   app.put('/v2/admin/tenants/:id/emisor', async (req, reply) => {
     const id = tenantIdOf(req);
-    const parsed = EmisorSchema.extend({ mh_password: z.string().optional(), firmador_password: z.string().optional() }).safeParse(req.body);
+    const parsed = EmisorInput.safeParse(req.body);
     if (!parsed.success) {
       const i = parsed.error.issues[0];
       throw new ValidationError(`${i?.path.join('.')}: ${i?.message}`, { issues: parsed.error.flatten() });
@@ -255,22 +206,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const e = parsed.data;
     const t = await query('SELECT 1 FROM tenants WHERE id = $1', [id]);
     if (!t.rows.length) throw new ValidationError('Empresa no encontrada');
-    const existing = await query<{ mh_password_enc: string; firmador_password_enc: string }>(
-      'SELECT mh_password_enc, firmador_password_enc FROM tenant_emisor WHERE tenant_id = $1', [id]);
-    if (!existing.rows.length) {
-      if (!e.mh_password || !e.firmador_password) throw new ValidationError('Para registrar los datos fiscales indica la clave API del MH y la del firmador');
-      await insertEmisor({ query }, id, { ...e, mh_password: e.mh_password, firmador_password: e.firmador_password });
-    } else {
-      const vals = EMISOR_COLS.map(k => (e as Record<string, unknown>)[k] ?? null);
-      await query(`
-        UPDATE tenant_emisor SET ${EMISOR_COLS.map((k, i) => `${k} = $${i + 2}`).join(', ')},
-               mh_password_enc = COALESCE($${EMISOR_COLS.length + 2}, mh_password_enc),
-               firmador_password_enc = COALESCE($${EMISOR_COLS.length + 3}, firmador_password_enc),
-               cert_path = $${EMISOR_COLS.length + 4}, updated_at = NOW()
-         WHERE tenant_id = $1`,
-        [id, ...vals, e.mh_password ? encryptSecret(e.mh_password) : null, e.firmador_password ? encryptSecret(e.firmador_password) : null,
-         path.join(FIRMADOR_CERTS_DIR, `${e.mh_nit}.crt`)]);
-    }
+    await upsertEmisor(id, e);
     await audit(id, req.auth?.userId, 'TENANT_EMISOR_UPDATED_BY_ADMIN', { nit: e.mh_nit, env: e.mh_env, by: req.auth?.email, passwords_changed: !!(e.mh_password || e.firmador_password) });
     return reply.send({ success: true });
   });

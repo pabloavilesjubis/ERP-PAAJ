@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
+import { cleanEmisor, EMPTY_EMISOR, EmisorFields, fileToBase64 } from '@/features/empresa/EmisorFields';
 import { Modal } from '@/components/ui/Modal';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Badge } from '@/components/ui/Badge';
@@ -17,13 +18,6 @@ import { platformApi, ROLE_LABEL, STATUS_LABEL, type Emisor, type PlatformTenant
 const SLUG_RE = /^[a-z0-9-]{2,32}$/;
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'neutral' | 'info'> = { active: 'success', suspended: 'warning', archived: 'neutral', pending_onboarding: 'info' };
-
-const fileToBase64 = (file: File) => new Promise<string>((res, rej) => {
-  const r = new FileReader();
-  r.onload = () => res(String(r.result).split(',')[1] ?? '');
-  r.onerror = rej;
-  r.readAsDataURL(file);
-});
 
 /**
  * Consola de plataforma: solo para los super-admin (PLATFORM_ADMIN_EMAILS).
@@ -99,13 +93,6 @@ function TenantRow({ t, onOpen }: { t: PlatformTenant; onOpen: () => void }) {
 }
 
 // ── Crear ────────────────────────────────────────────────────────────────────
-const EMPTY_EMISOR: Emisor = {
-  mh_env: 'production', mh_nit: '', emisor_nrc: '', emisor_nombre: '', emisor_cod_actividad: '', emisor_desc_actividad: '',
-  emisor_tipo_establecimiento: '02', emisor_departamento: '', emisor_municipio: '', emisor_complemento: '', emisor_telefono: null,
-  emisor_email: '', punto_venta_establecimiento: 'M001', punto_venta_punto: 'P001', emisor_cod_estable_mh: null, emisor_cod_punto_venta_mh: null,
-  mh_password: '', firmador_password: '',
-};
-
 function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const [t, setT] = useState({ slug: '', nombre_legal: '', nombre_comercial: '' });
@@ -118,7 +105,7 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const [corr, setCorr] = useState({ '01': '0', '03': '0', '05': '0', '14': '0' });
   const run = useMutation({
     mutationFn: async () => {
-      if (withFiscal && cert) await platformApi.uploadCert(e.mh_nit.trim(), await fileToBase64(cert));
+      if (withFiscal && cert) await platformApi.uploadCert(e.mh_nit.replace(/\D/g, ''), await fileToBase64(cert));
       return platformApi.create({
         tenant: { slug: t.slug.trim(), nombre_legal: t.nombre_legal.trim(), nombre_comercial: t.nombre_comercial.trim() || null },
         admin: { email: a.email.trim(), password: a.password, full_name: a.full_name.trim() || null },
@@ -166,48 +153,6 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
         </div>
       </>}
     </Modal>
-  );
-}
-
-function cleanEmisor(e: Emisor): Emisor {
-  const out = { ...e } as Record<string, unknown>;
-  for (const [k, v] of Object.entries(out)) if (typeof v === 'string') out[k] = v.trim();
-  for (const k of ['emisor_telefono', 'emisor_cod_estable_mh', 'emisor_cod_punto_venta_mh']) if (!out[k]) out[k] = null;
-  if (!out.mh_password) delete out.mh_password;
-  if (!out.firmador_password) delete out.firmador_password;
-  return out as unknown as Emisor;
-}
-
-function EmisorFields({ e, setE, requirePasswords }: { e: Emisor; setE: (e: Emisor) => void; requirePasswords: boolean }) {
-  const f = (k: keyof Emisor) => ({ value: (e[k] as string | null) ?? '', onChange: (ev: { target: { value: string } }) => setE({ ...e, [k]: ev.target.value }) });
-  const pw = requirePasswords ? '' : ' (vacío = conservar)';
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-      <Field label="Ambiente MH">
-        <Select value={e.mh_env} onChange={ev => setE({ ...e, mh_env: ev.target.value as Emisor['mh_env'] })}>
-          <option value="production">Producción</option><option value="sandbox">Pruebas (sandbox)</option>
-        </Select>
-      </Field>
-      <Field label="NIT (14 dígitos)"><Input {...f('mh_nit')} placeholder="06140000000000" /></Field>
-      <Field label="NRC"><Input {...f('emisor_nrc')} /></Field>
-      <Field label={`Clave API del MH${pw}`}><Input type="password" {...f('mh_password')} /></Field>
-      <Field label={`Clave del certificado (firmador)${pw}`}><Input type="password" {...f('firmador_password')} /></Field>
-      <Field label="Nombre del emisor"><Input {...f('emisor_nombre')} /></Field>
-      <Field label="Código de actividad (CAT-019)"><Input {...f('emisor_cod_actividad')} /></Field>
-      <Field label="Descripción de la actividad"><Input {...f('emisor_desc_actividad')} /></Field>
-      <Field label="Tipo de establecimiento (02 = casa matriz)"><Input {...f('emisor_tipo_establecimiento')} /></Field>
-      <Field label="Departamento (2 dígitos)"><Input {...f('emisor_departamento')} placeholder="06" /></Field>
-      <Field label="Municipio (2 dígitos)"><Input {...f('emisor_municipio')} placeholder="14" /></Field>
-      <Field label="Dirección"><Input {...f('emisor_complemento')} /></Field>
-      <Field label="Teléfono"><Input {...f('emisor_telefono')} /></Field>
-      <Field label="Email del emisor"><Input type="email" {...f('emisor_email')} /></Field>
-      <span />
-      <Field label="Establecimiento (4)"><Input {...f('punto_venta_establecimiento')} placeholder="M001" /></Field>
-      <Field label="Punto de venta (4)"><Input {...f('punto_venta_punto')} placeholder="P001" /></Field>
-      <span />
-      <Field label="Código establecimiento MH (opcional)"><Input {...f('emisor_cod_estable_mh')} /></Field>
-      <Field label="Código punto de venta MH (opcional)"><Input {...f('emisor_cod_punto_venta_mh')} /></Field>
-    </div>
   );
 }
 
@@ -287,7 +232,7 @@ function FiscalTab({ d }: { d: TenantDetail }) {
   useEffect(() => { if (d.emisor) setE({ ...EMPTY_EMISOR, ...d.emisor, mh_password: '', firmador_password: '' }); }, [d.emisor]);
   const save = useMutation({
     mutationFn: async () => {
-      if (cert) await platformApi.uploadCert(e.mh_nit.trim(), await fileToBase64(cert));
+      if (cert) await platformApi.uploadCert(e.mh_nit.replace(/\D/g, ''), await fileToBase64(cert));
       return platformApi.saveEmisor(d.tenant.id, cleanEmisor(e));
     },
     onSuccess: () => { setCert(null); refresh(); },
