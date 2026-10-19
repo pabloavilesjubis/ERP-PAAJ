@@ -12,6 +12,7 @@ if (hasDb) {
   delete process.env.POSTGRES_PASSWORD;
 }
 process.env.AUTH_JWT_SECRET ??= 'test-secret-test-secret-test-secret';
+process.env.TENANT_SECRETS_KEY ??= Buffer.alloc(32, 7).toString('base64');
 
 export async function buildApp(): Promise<FastifyInstance> {
   const { registerErpModules } = await import('../../src/erp/index.js');

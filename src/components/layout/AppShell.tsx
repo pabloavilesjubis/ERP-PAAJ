@@ -82,7 +82,7 @@ const NAV: NavItem[] = [
   { to: '/csv', icon: 'download', label: 'CSV / Plantillas', section: 'Datos' },
   { to: '/configuracion', icon: 'edit', label: 'Configuración', section: 'Ajustes' },
   { to: '/usuarios', icon: 'shield', label: 'Usuarios', section: 'Ajustes', perm: 'users:manage' },
-  { to: '/admin/tenants', icon: 'building', label: 'Tenants', section: 'Plataforma', adminOnly: true },
+  { to: '/admin/tenants', icon: 'building', label: 'Empresas', section: 'Plataforma', adminOnly: true },
 ];
 
 const TITLES: Record<string, string> = {
@@ -113,7 +113,7 @@ const TITLES: Record<string, string> = {
   '/csv': 'Importar / Exportar CSV',
   '/configuracion': 'Configuración',
   '/usuarios': 'Usuarios de la empresa',
-  '/admin/tenants': 'Tenants — Administración de plataforma',
+  '/admin/tenants': 'Plataforma — Empresas',
 };
 
 /** Título por la ruta más específica que coincida (los módulos tienen subrutas). */

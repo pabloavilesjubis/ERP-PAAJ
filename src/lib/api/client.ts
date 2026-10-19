@@ -88,6 +88,8 @@ export const api = {
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path),
+  /** Método arbitrario con body (p.ej. DELETE con confirmación). */
+  request: <T>(method: string, path: string, body?: unknown) => request<T>(method, path, body),
 };
 
 /** Endpoints específicos del API v2 */
