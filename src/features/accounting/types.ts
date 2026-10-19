@@ -134,3 +134,93 @@ export interface SetupStatus {
   entries: number;
   missing_roles: Array<{ role_key: string; label: string }>;
 }
+
+// ── F2: integración y auxiliares ──
+export interface IntegrationSettings {
+  auto_post: boolean;
+  posting_start_date: string | null;
+  sales_cash_role: 'cash' | 'bank' | 'receivables';
+  purchases_cash_mode: 'payables' | 'cash';
+  default_credit_days: number;
+  updated_by?: string | null;
+  updated_at?: string;
+}
+
+export type PostingStatus = 'pendiente' | 'contabilizado' | 'error' | 'omitido';
+
+export interface IntegrationDoc {
+  module: 'ventas' | 'compras';
+  id: number;
+  doc_date: string;
+  subtype: string;
+  doc_ref: string;
+  party_name: string;
+  total: number;
+  status: PostingStatus;
+  message: string | null;
+  entry_id: number | null;
+  entry_number: number | null;
+}
+
+export type SubKind = 'cxc' | 'cxp';
+
+export interface PartyBalance {
+  party_key: string;
+  party_name: string;
+  party_id: number | null;
+  open_docs: number;
+  balance: number;
+  overdue: number;
+  advances: number;
+}
+
+export interface SubDocument {
+  id: number;
+  source_module: 'ventas' | 'compras' | 'manual';
+  source_id: string;
+  party_key: string;
+  party_id: number | null;
+  party_name: string;
+  party_nit: string | null;
+  doc_type: string | null;
+  doc_number: string | null;
+  doc_date: string;
+  due_date: string;
+  amount: number;
+  applied: number;
+  balance: number;
+  description: string | null;
+  status: 'vigente' | 'anulado';
+  entry_id: number | null;
+  days_overdue: number;
+}
+
+export interface AgingRow {
+  party_key: string; party_name: string;
+  current: number; d1_30: number; d31_60: number; d61_90: number; d90_plus: number; total: number;
+}
+
+export interface Payment {
+  id: number;
+  number: number;
+  payment_date: string;
+  party_key: string;
+  party_name: string;
+  method: string;
+  amount: number;
+  unapplied: number;
+  reference: string | null;
+  status: 'vigente' | 'anulado';
+  entry_id: number | null;
+  fund_code: string | null;
+  fund_name: string | null;
+  created_by_name: string | null;
+  void_reason: string | null;
+}
+
+export interface FundAccount { id: number; code: string; name: string }
+
+export interface PartyRow {
+  party_id: number; nombre: string; nit: string | null; nrc: string | null; tipo: string;
+  expense_account_id: number | null; income_account_id: number | null; credit_days: number | null;
+}

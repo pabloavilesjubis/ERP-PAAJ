@@ -1,7 +1,7 @@
 import { api } from '@/lib/api/client';
 import type {
-  Account, AccountMovement, EntryDetail, EntryLine, EntrySummary, JournalEntry, LedgerLine, PeriodRow,
-  RoleAssignment, SetupStatus,
+  Account, AccountMovement, AgingRow, EntryDetail, EntryLine, EntrySummary, FundAccount, IntegrationDoc, IntegrationSettings,
+  JournalEntry, LedgerLine, PartyBalance, PartyRow, Payment, PeriodRow, RoleAssignment, SetupStatus, SubDocument, SubKind,
 } from './types';
 
 const qs = (p: Record<string, string | number | undefined | null>) => {
@@ -65,4 +65,64 @@ export const accApi = {
   periods: (year: number) => api.get<{ year: number; items: PeriodRow[] }>(`/v2/acc/periods${qs({ year })}`),
   closePeriod: (year: number, month: number, notes?: string) => api.post<{ success: boolean }>('/v2/acc/periods/close', { year, month, notes }),
   reopenPeriod: (year: number, month: number, notes: string) => api.post<{ success: boolean }>('/v2/acc/periods/reopen', { year, month, notes }),
+};
+
+export interface PaymentInput {
+  payment_date: string;
+  party_key: string;
+  method: string;
+  fund_account_id: number | null;
+  amount: number;
+  allocations: Array<{ document_id: number; amount: number }>;
+  reference?: string | null;
+  notes?: string | null;
+}
+
+export interface ManualDocInput {
+  party_id: number; doc_type?: string | null; doc_number?: string | null; doc_date: string; due_date?: string | null;
+  amount: number; counter_account_id: number; description?: string | null;
+}
+
+export interface DistributionLine { account_id: number; amount: number; cost_center?: string | null; description?: string | null }
+
+export const integrationApi = {
+  settings: () => api.get<IntegrationSettings>('/v2/acc/integration/settings'),
+  saveSettings: (b: IntegrationSettings) => api.put<{ success: boolean }>('/v2/acc/integration/settings', b),
+  summary: () => api.get<{ items: Array<{ module: string; status: string; n: number; total: number }> }>('/v2/acc/integration/summary'),
+  documents: (p: { module: string; status?: string; from?: string; to?: string; q?: string; limit?: number; offset?: number }) =>
+    api.get<{ items: IntegrationDoc[]; total: number }>(`/v2/acc/integration/documents${qs(p)}`),
+  postPending: (module?: string) => api.post<{ result: Record<string, Record<string, number>> }>('/v2/acc/integration/post-pending', { module }),
+  retry: (module: string, id: number) => api.post<{ result: string }>('/v2/acc/integration/retry', { module, id }),
+  distribution: (compraId: number) => api.get<{
+    compra: { id: number; fecha: string; proveedor_nombre: string; gravado: number; exento: number; iva: number; descripcion: string | null; otros: string | null };
+    lines: Array<DistributionLine & { code: string; name: string }>;
+    posting: { status: string; message: string | null; entry_id: number | null; entry_number: number | null } | null;
+    party_id: number | null;
+  }>(`/v2/acc/compras/${compraId}/distribution`),
+  saveDistribution: (compraId: number, lines: DistributionLine[], remember_for_supplier: boolean) =>
+    api.put<{ result: string }>(`/v2/acc/compras/${compraId}/distribution`, { lines, remember_for_supplier }),
+  parties: () => api.get<{ items: PartyRow[] }>('/v2/acc/party-accounts'),
+  saveParty: (id: number, b: { expense_account_id: number | null; income_account_id: number | null; credit_days: number | null }) =>
+    api.put<{ success: boolean }>(`/v2/acc/party-accounts/${id}`, b),
+};
+
+export const subApi = {
+  fundAccounts: () => api.get<{ items: FundAccount[] }>('/v2/acc/fund-accounts').then(r => r.items),
+  parties: (kind: SubKind, as_of?: string, all = false) =>
+    api.get<{ as_of: string; items: PartyBalance[] }>(`/v2/acc/${kind}/parties${qs({ as_of, all: all ? 1 : undefined })}`),
+  documents: (kind: SubKind, p: { party_key?: string; status?: string; from?: string; to?: string; q?: string }) =>
+    api.get<{ items: SubDocument[] }>(`/v2/acc/${kind}/documents${qs(p)}`),
+  createDocument: (kind: SubKind, b: ManualDocInput) => api.post<{ id: number }>(`/v2/acc/${kind}/documents`, b),
+  voidDocument: (kind: SubKind, id: number, reason: string) => api.post<{ success: boolean }>(`/v2/acc/${kind}/documents/${id}/void`, { reason }),
+  aging: (kind: SubKind, as_of?: string) => api.get<{ as_of: string; items: AgingRow[] }>(`/v2/acc/${kind}/aging${qs({ as_of })}`),
+  payments: (kind: SubKind, p: { party_key?: string; from?: string; to?: string }) =>
+    api.get<{ items: Payment[] }>(`/v2/acc/${kind}/payments${qs(p)}`),
+  payment: (kind: SubKind, id: number) => api.get<{
+    payment: Payment & { notes: string | null; voided_by_name: string | null };
+    allocations: Array<{ document_id: number; amount: number; doc_type: string | null; doc_number: string | null; doc_date: string; doc_amount: number }>;
+  }>(`/v2/acc/${kind}/payments/${id}`),
+  createPayment: (kind: SubKind, b: PaymentInput) => api.post<{ id: number }>(`/v2/acc/${kind}/payments`, b),
+  voidPayment: (kind: SubKind, id: number, reason: string) => api.post<{ success: boolean }>(`/v2/acc/${kind}/payments/${id}/void`, { reason }),
+  check: (kind: SubKind, as_of?: string) =>
+    api.get<{ as_of: string; ledger: number; subledger: number; advances: number; difference: number }>(`/v2/acc/${kind}/check${qs({ as_of })}`),
 };

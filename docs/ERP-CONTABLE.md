@@ -7,7 +7,7 @@ empresa (tenant). Este documento se actualiza al cerrar cada fase.
 |---|---|---|
 | F0 | Fundaciones: roles y permisos, usuarios por empresa, migraciones, tests, CI | ✅ |
 | F1 | Núcleo contable: catálogo, asientos, partidas, períodos, diario, mayor, balanza | ✅ |
-| F2 | Ventas/compras contabilizadas, CxC y CxP | ⏳ |
+| F2 | Ventas/compras contabilizadas, CxC y CxP | ✅ |
 | F3 | Estados financieros y cierres | ⏳ |
 | F4 | Bancos y conciliación | ⏳ |
 | F5 | Planillas | ⏳ |
@@ -69,6 +69,32 @@ Pantallas: Asientos, Libros (diario, mayor, balanza), Catálogo (importación
 CSV con vista previa), Períodos, Configuración contable. Una empresa nueva:
 1) importa su catálogo, 2) asigna las cuentas por función, 3) registra sus
 saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
+
+## Ventas, compras, CxC y CxP (F2) — migración 007
+
+- **Contabilización automática**: triggers en `public.ventas` y
+  `public.compras` llaman a `accounting.try_sync_document`. Si falla (cuenta
+  sin asignar, período cerrado, documento con cobros aplicados), la operación
+  NO se bloquea: el error queda en `accounting.document_postings` y aparece en
+  Contabilidad → Ventas y compras. Arranca apagada; el contador fija la fecha
+  de inicio, la activa y lanza "Contabilizar pendientes".
+- Editar un documento ya contabilizado revierte su asiento y lo vuelve a
+  contabilizar (huella `fingerprint`); borrarlo o marcarlo `anulado` lo revierte.
+- **Ventas**: FCF con IVA incluido (monto/1.13); CCF gravado/exento/IVA;
+  retenciones del cliente (renta en `metadata.retencionRenta`, IVA en
+  `resumen.ivaRete1` del DTE); NC (tipo 05) en sentido inverso. Crédito
+  (`condicionOperacion = 2`) → CxC; contado → caja/banco/CxC según configuración.
+- **Compras**: base a la cuenta del proveedor (`party_accounts`) o costo/gasto
+  según `metadata.clasificacion`; IVA crédito, percepción (`ivaPercibido`),
+  retención 1% (`ivaRetenido`), renta (`retencionRenta`), otros tributos
+  (`otrosTributos`). El contador puede distribuir la compra en varias cuentas.
+- **Auxiliares**: `accounting.documents` (saldo en la vista
+  `document_balances`), `payments` + `payment_allocations` (aplicación a varios
+  documentos, sobrante = anticipo, compensación de NC). Documentos manuales
+  para saldos iniciales por tercero. `subledger_check` compara el auxiliar
+  con la cuenta de control.
+- Pantallas: Finanzas → Cuentas por cobrar / por pagar (saldos, documentos,
+  antigüedad, cobros/pagos) y Contabilidad → Ventas y compras.
 
 ## Convenciones del backend
 

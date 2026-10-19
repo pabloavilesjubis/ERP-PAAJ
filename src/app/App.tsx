@@ -23,6 +23,8 @@ import { AsientosPage } from '@/features/accounting/pages/AsientosPage';
 import { LibrosPage } from '@/features/accounting/pages/LibrosPage';
 import { PeriodosPage } from '@/features/accounting/pages/PeriodosPage';
 import { ConfigContablePage } from '@/features/accounting/pages/ConfigContablePage';
+import { IntegracionPage } from '@/features/accounting/pages/IntegracionPage';
+import { SubledgerPage } from '@/features/accounting/pages/SubledgerPage';
 
 /**
  * App routes. La autenticación la maneja exclusivamente `<AuthGate>` (en
@@ -68,6 +70,9 @@ export function App() {
         <Route path="contabilidad/libros/balanza" element={<LibrosPage book="balanza" />} />
         <Route path="contabilidad/periodos" element={<PeriodosPage />} />
         <Route path="contabilidad/configuracion" element={<ConfigContablePage />} />
+        <Route path="contabilidad/integracion" element={<IntegracionPage />} />
+        <Route path="cxc" element={<SubledgerPage key="cxc" kind="cxc" />} />
+        <Route path="cxp" element={<SubledgerPage key="cxp" kind="cxp" />} />
         <Route path="contribuyentes" element={<ContribuyentesPage />} />
         <Route path="csv" element={<CsvPage />} />
         <Route path="configuracion" element={<ConfiguracionPage />} />
