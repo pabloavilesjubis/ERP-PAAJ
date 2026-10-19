@@ -174,7 +174,12 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   app.post('/v2/admin/tenants', async (req, reply) => {
     const parsed = CreateBody.safeParse(req.body);
     if (!parsed.success) {
-      throw new ValidationError('Body inválido', { issues: parsed.error.flatten() });
+      const i = parsed.error.issues[0];
+      const FIELD: Record<string, string> = { slug: 'Identificador (slug): de 2 a 32 caracteres, minúsculas, números y guiones',
+        nombre_legal: 'Nombre legal', email: 'Email del administrador', password: 'Contraseña: mínimo 8 caracteres' };
+      const key = String(i?.path[i.path.length - 1] ?? '');
+      throw new ValidationError(FIELD[key] ? `Revisa: ${FIELD[key]}` : `Dato inválido en ${i?.path.join('.')}: ${i?.message}`,
+        { issues: parsed.error.flatten() });
     }
     const b = parsed.data;
 

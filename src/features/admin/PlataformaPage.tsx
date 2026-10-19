@@ -14,6 +14,8 @@ import { useAuth } from '@/auth/useAuth';
 import { dmy } from '@/features/accounting/format';
 import { platformApi, ROLE_LABEL, STATUS_LABEL, type Emisor, type PlatformTenant, type TenantDetail } from './api';
 
+const SLUG_RE = /^[a-z0-9-]{2,32}$/;
+
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'neutral' | 'info'> = { active: 'success', suspended: 'warning', archived: 'neutral', pending_onboarding: 'info' };
 
 const fileToBase64 = (file: File) => new Promise<string>((res, rej) => {
@@ -107,6 +109,8 @@ const EMPTY_EMISOR: Emisor = {
 function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const [t, setT] = useState({ slug: '', nombre_legal: '', nombre_comercial: '' });
+  // El slug sigue al nombre legal hasta que el usuario lo edita a mano
+  const [slugTouched, setSlugTouched] = useState(false);
   const [a, setA] = useState({ email: '', password: '', full_name: '' });
   const [withFiscal, setWithFiscal] = useState(false);
   const [e, setE] = useState<Emisor>(EMPTY_EMISOR);
@@ -127,13 +131,15 @@ function CreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const slugFrom = (name: string) => name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/s\.?\s*a\.?\s*(de)?\s*c\.?\s*v\.?/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
   return (
     <Modal title="Nueva empresa" onClose={onClose} size="wide" onSave={() => run.mutate()} saveLabel="Crear empresa"
-      saveDisabled={run.isPending || !t.slug || !t.nombre_legal || !a.email || a.password.length < 8}>
+      saveDisabled={run.isPending || !SLUG_RE.test(t.slug) || !t.nombre_legal || !a.email || a.password.length < 8}>
       <ErrorBanner error={run.error} />
       <strong>Empresa</strong>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr', gap: 10 }}>
-        <Field label="Nombre legal"><Input value={t.nombre_legal} onChange={ev => setT({ ...t, nombre_legal: ev.target.value, slug: t.slug || slugFrom(ev.target.value) })} placeholder="ACME S.A. DE C.V." /></Field>
+        <Field label="Nombre legal"><Input value={t.nombre_legal} onChange={ev => setT({ ...t, nombre_legal: ev.target.value, slug: slugTouched ? t.slug : slugFrom(ev.target.value) })} placeholder="ACME S.A. DE C.V." /></Field>
         <Field label="Nombre comercial"><Input value={t.nombre_comercial} onChange={ev => setT({ ...t, nombre_comercial: ev.target.value })} /></Field>
-        <Field label="Identificador (slug)"><Input value={t.slug} onChange={ev => setT({ ...t, slug: ev.target.value.toLowerCase() })} placeholder="acme" /></Field>
+        <Field label="Identificador (slug)" error={t.slug && !SLUG_RE.test(t.slug) ? 'De 2 a 32: minúsculas, números y guiones' : undefined}>
+          <Input value={t.slug} onChange={ev => { setSlugTouched(true); setT({ ...t, slug: ev.target.value.toLowerCase() }); }} placeholder="acme" />
+        </Field>
       </div>
       <strong>Administrador de la empresa (primer usuario)</strong>
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: 10 }}>
