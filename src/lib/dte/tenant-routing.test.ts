@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/config/env', () => ({ env: { adapter: 'api', dteServiceUrl: 'http://dte' } }));
+// Como en producción: VITE_DATA_ADAPTER sin definir, pero la app corre con el ApiAdapter
+vi.mock('@/config/env', () => ({ env: { adapter: 'local', dteServiceUrl: 'http://dte' } }));
+vi.mock('@/lib/data', () => ({ getAdapter: () => ({ kind: 'api' }) }));
 
 // Las pruebas corren en Node: localStorage en memoria
 const mem = new Map<string, string>();

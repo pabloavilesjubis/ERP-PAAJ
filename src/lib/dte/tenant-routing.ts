@@ -1,4 +1,4 @@
-import { env } from '@/config/env';
+import { getAdapter } from '@/lib/data';
 
 /**
  * ¿Por qué rutas del dte-service emite la empresa de la sesión?
@@ -25,7 +25,9 @@ function stored(): StoredAuth | null {
 
 export function usesTenantDteApi(): boolean {
   const tenantId = stored()?.user?.tenant_id;
-  return env.adapter === 'api' && tenantId != null && Number(tenantId) !== LEGACY_DTE_TENANT_ID;
+  // Mismo criterio que la app para el modo multi-empresa (en build de producción
+  // siempre es 'api', aunque VITE_DATA_ADAPTER no esté definida)
+  return getAdapter().kind === 'api' && tenantId != null && Number(tenantId) !== LEGACY_DTE_TENANT_ID;
 }
 
 export function dteAuthHeaders(): Record<string, string> {
