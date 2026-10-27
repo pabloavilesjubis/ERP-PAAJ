@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '@/lib/api/client';
 import { useBranding } from '@/branding/BrandingProvider';
 import { refreshSession } from '@/auth/useAuth';
+import { ACTIVIDADES_ECONOMICAS, findActividad } from '@/lib/catalogos/mh';
 
 /**
  * Wizard de onboarding — 4 pasos secuenciales:
@@ -108,7 +109,7 @@ export function OnboardingWizard() {
           emisor_departamento: form.emisor_departamento,
           emisor_municipio: form.emisor_municipio,
           emisor_complemento: form.emisor_complemento,
-          emisor_telefono: form.emisor_telefono || null,
+          emisor_telefono: form.emisor_telefono,
           emisor_email: form.emisor_email,
           punto_venta_establecimiento: form.punto_venta_establecimiento.toUpperCase(),
           punto_venta_punto: form.punto_venta_punto.toUpperCase(),
@@ -201,7 +202,14 @@ function Step1Empresa({ form, update }: StepProps) {
         <input style={inputStyle} value={form.emisor_nrc} onChange={e => update('emisor_nrc', e.target.value)} />
       </Field>
       <Field label="Código actividad (CAT-019)" required>
-        <input style={inputStyle} value={form.emisor_cod_actividad} onChange={e => update('emisor_cod_actividad', e.target.value)} placeholder="47711" />
+        <input style={inputStyle} list="onb-actividades" value={form.emisor_cod_actividad} placeholder="Código o nombre, ej. 96092"
+          onChange={e => {
+            const cod = e.target.value.trim();
+            update('emisor_cod_actividad', cod);
+            const cat = findActividad(cod);
+            if (cat) update('emisor_desc_actividad', cat.nombre);
+          }} />
+        <datalist id="onb-actividades">{ACTIVIDADES_ECONOMICAS.map(a => <option key={a.codigo} value={a.codigo}>{a.nombre}</option>)}</datalist>
       </Field>
       <Field label="Descripción actividad" required colSpan={2}>
         <input style={inputStyle} value={form.emisor_desc_actividad} onChange={e => update('emisor_desc_actividad', e.target.value)} />
@@ -229,8 +237,8 @@ function Step2Ubicacion({ form, update }: StepProps) {
       <Field label="Dirección completa" required colSpan={2}>
         <input style={inputStyle} value={form.emisor_complemento} onChange={e => update('emisor_complemento', e.target.value)} placeholder="Av. La Capilla 318" />
       </Field>
-      <Field label="Teléfono">
-        <input style={inputStyle} value={form.emisor_telefono} onChange={e => update('emisor_telefono', e.target.value)} />
+      <Field label="Teléfono" required>
+        <input style={inputStyle} value={form.emisor_telefono} placeholder="2222-2222" onChange={e => update('emisor_telefono', e.target.value)} />
       </Field>
       <Field label="Email" required>
         <input style={inputStyle} type="email" value={form.emisor_email} onChange={e => update('emisor_email', e.target.value)} />

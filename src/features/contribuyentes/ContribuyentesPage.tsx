@@ -6,13 +6,12 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { SectionHeader } from '@/components/ui/SectionHeader';
-import {
-  ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, findDepartamento, findMunicipio,
-  getMunicipiosFor,
-} from '@/lib/catalogos/mh';
+import { DEPARTAMENTOS, findDepartamento, findMunicipio, getMunicipiosFor } from '@/lib/catalogos/mh';
+import { faltantesCcf } from '@/lib/dte/receptor-ccf';
 import { newId } from '@/lib/utils/format';
 import { useDataStore } from '@/stores/data.store';
 import type { Contribuyente, ContribuyenteTipo } from '@/types/domain';
+import { ActividadField } from './ActividadField';
 
 const empty: Omit<Contribuyente, 'id'> = {
   nombre: '', nit: '', dui: '', nrc: '', giro: '', telefono: '', email: '', direccion: '',
@@ -21,6 +20,9 @@ const empty: Omit<Contribuyente, 'id'> = {
 };
 
 type Tab = 'all' | ContribuyenteTipo;
+
+/** A un cliente se le emite CCF: se registra con todo lo que el CCF exige. */
+const esCliente = (t: ContribuyenteTipo) => t === 'Cliente' || t === 'Ambos';
 
 export function ContribuyentesPage() {
   const data = useDataStore(s => s.data);
@@ -51,8 +53,12 @@ export function ContribuyentesPage() {
   function openNew() { setForm({ ...empty }); setEditId(null); setShowModal(true); }
   function openEdit(c: Contribuyente) { setForm({ ...c }); setEditId(c.id); setShowModal(true); }
 
+  const faltan = esCliente(form.tipo) ? faltantesCcf(form) : [];
+  const puedeGuardar = !!form.nombre.trim() && !!form.nrc.trim() && faltan.length === 0;
+  const req = esCliente(form.tipo) ? ' *' : '';
+
   async function save() {
-    if (!form.nombre || !form.nrc) return;
+    if (!puedeGuardar) return;
     const next = editId
       ? data.contribuyentes.map(c => c.id === editId ? { ...c, ...form } : c)
       : [...data.contribuyentes, { id: newId(), ...form }];
@@ -95,6 +101,9 @@ export function ContribuyentesPage() {
                 <div>
                   <div className="contrib-name">{c.nombre}</div>
                   <Badge tone={c.tipo === 'Cliente' ? 'info' : c.tipo === 'Proveedor' ? 'neutral' : 'warning'}>{c.tipo}</Badge>
+                  {esCliente(c.tipo) && faltantesCcf(c).length > 0 && (
+                    <span title={`Falta: ${faltantesCcf(c).join(', ')}`}> <Badge tone="warning">Incompleto para CCF</Badge></span>
+                  )}
                 </div>
               </div>
               <div className="contrib-meta">
@@ -131,13 +140,13 @@ export function ContribuyentesPage() {
       )}
 
       {showModal && (
-        <Modal title={editId ? 'Editar contribuyente' : 'Nuevo contribuyente'} onClose={() => setShowModal(false)} onSave={save}>
+        <Modal title={editId ? 'Editar contribuyente' : 'Nuevo contribuyente'} onClose={() => setShowModal(false)} onSave={save} saveDisabled={!puedeGuardar}>
           <div className="two-col">
-            <Field label="Nombre / Razón social" fullWidth>
+            <Field label="Nombre / Razón social *" fullWidth>
               <Input type="text" placeholder="Empresa o persona natural" value={form.nombre} onChange={e => setForm(p => ({ ...p, nombre: e.target.value }))} />
             </Field>
-            <Field label="NIT"><Input type="text" placeholder="0614-000000-000-0" value={form.nit} onChange={e => setForm(p => ({ ...p, nit: e.target.value }))} /></Field>
-            <Field label="NRC"><Input type="text" placeholder="123456-7" value={form.nrc} onChange={e => setForm(p => ({ ...p, nrc: e.target.value }))} /></Field>
+            <Field label={`NIT${req}`}><Input type="text" placeholder="0614-000000-000-0" value={form.nit} onChange={e => setForm(p => ({ ...p, nit: e.target.value }))} /></Field>
+            <Field label="NRC *"><Input type="text" placeholder="123456-7" value={form.nrc} onChange={e => setForm(p => ({ ...p, nrc: e.target.value }))} /></Field>
             <Field label="DUI (opcional, persona natural)">
               <Input type="text" placeholder="01234567-8" value={form.dui ?? ''} onChange={e => setForm(p => ({ ...p, dui: e.target.value }))} />
             </Field>
@@ -146,42 +155,9 @@ export function ContribuyentesPage() {
                 <option>Cliente</option><option>Proveedor</option><option>Ambos</option>
               </Select>
             </Field>
-            <Field label="Actividad económica (CAT-019 del MH)" fullWidth>
-              <Select
-                value={form.codActividad ?? ''}
-                onChange={e => {
-                  const codigo = e.target.value;
-                  const cat = ACTIVIDADES_ECONOMICAS.find(a => a.codigo === codigo);
-                  setForm(p => ({
-                    ...p,
-                    codActividad: codigo,
-                    giro: cat ? cat.nombre : (codigo === 'otro' ? (p.giro ?? '') : ''),
-                  }));
-                }}
-              >
-                <option value="">— Selecciona una actividad —</option>
-                {ACTIVIDADES_ECONOMICAS.map(a => (
-                  <option key={a.codigo} value={a.codigo}>{a.codigo} — {a.nombre}</option>
-                ))}
-                <option value="otro">Otra (ingresar manualmente)</option>
-              </Select>
-            </Field>
-            {form.codActividad === 'otro' && (
-              <>
-                <Field label="Código actividad (2-6 dígitos)">
-                  <Input
-                    type="text"
-                    placeholder="46900"
-                    value={form.codActividad === 'otro' ? '' : (form.codActividad ?? '')}
-                    onChange={e => setForm(p => ({ ...p, codActividad: e.target.value.replace(/\D/g, '').slice(0, 6) || 'otro' }))}
-                  />
-                </Field>
-                <Field label="Descripción">
-                  <Input type="text" placeholder="Mi actividad" value={form.giro ?? ''} onChange={e => setForm(p => ({ ...p, giro: e.target.value }))} />
-                </Field>
-              </>
-            )}
-            <Field label="Departamento (CAT-012)">
+            <ActividadField required={esCliente(form.tipo)} codigo={form.codActividad ?? ''} descripcion={form.giro ?? ''}
+              onChange={(codActividad, giro) => setForm(p => ({ ...p, codActividad, giro }))} />
+            <Field label={`Departamento (CAT-012)${req}`}>
               <Select
                 value={form.departamento ?? ''}
                 onChange={e => {
@@ -200,7 +176,7 @@ export function ContribuyentesPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="Municipio (CAT-013)">
+            <Field label={`Municipio (CAT-013)${req}`}>
               <Select
                 value={form.municipio ?? ''}
                 onChange={e => setForm(p => ({ ...p, municipio: e.target.value }))}
@@ -213,11 +189,14 @@ export function ContribuyentesPage() {
               </Select>
             </Field>
             <Field label="Teléfono"><Input type="text" placeholder="2234-5678" value={form.telefono ?? ''} onChange={e => setForm(p => ({ ...p, telefono: e.target.value }))} /></Field>
-            <Field label="Email"><Input type="email" placeholder="correo@empresa.com" value={form.email ?? ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></Field>
-            <Field label="Dirección (calle, colonia, número)" fullWidth>
+            <Field label={`Correo electrónico${req}`}><Input type="email" placeholder="correo@empresa.com" value={form.email ?? ''} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} /></Field>
+            <Field label={`Dirección (calle, colonia, número)${req}`} fullWidth>
               <Input type="text" placeholder="Col. Escalón, Calle Los Almendros #15" value={form.direccion ?? ''} onChange={e => setForm(p => ({ ...p, direccion: e.target.value }))} />
             </Field>
           </div>
+          {esCliente(form.tipo) && faltan.length > 0 && (
+            <div className="banner banner-warning">Para poder emitirle CCF falta: {faltan.join(', ')}.</div>
+          )}
         </Modal>
       )}
     </div>

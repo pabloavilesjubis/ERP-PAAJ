@@ -1,5 +1,6 @@
 import { Field, Input, Select } from '@/components/ui/Field';
-import { ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, findActividad, getMunicipiosFor } from '@/lib/catalogos/mh';
+import { DEPARTAMENTOS, getMunicipiosFor } from '@/lib/catalogos/mh';
+import { ActividadField } from '@/features/contribuyentes/ActividadField';
 import type { Emisor } from '@/features/admin/api';
 
 /**
@@ -51,15 +52,8 @@ export function EmisorFields({ e, setE, requirePasswords, showPasswords = true }
         <Input {...f('mh_nit')} placeholder="0614-010101-101-1" />
       </Field>
       <Field label="NRC"><Input {...f('emisor_nrc')} placeholder="123456-7" /></Field>
-      <Field label="Actividad económica (código)">
-        <Input list="mh-actividades" value={e.emisor_cod_actividad} onChange={ev => {
-          const cod = ev.target.value.trim();
-          const cat = findActividad(cod);
-          setE({ ...e, emisor_cod_actividad: cod, emisor_desc_actividad: cat ? cat.nombre : e.emisor_desc_actividad });
-        }} placeholder="46900" />
-        <datalist id="mh-actividades">{ACTIVIDADES_ECONOMICAS.map(a => <option key={a.codigo} value={a.codigo}>{a.nombre}</option>)}</datalist>
-      </Field>
-      <Field label="Descripción de la actividad"><Input {...f('emisor_desc_actividad')} /></Field>
+      <ActividadField codigo={e.emisor_cod_actividad} descripcion={e.emisor_desc_actividad}
+        onChange={(cod, desc) => setE({ ...e, emisor_cod_actividad: cod, emisor_desc_actividad: desc })} />
       <Field label="Tipo de establecimiento">
         <Select {...f('emisor_tipo_establecimiento')}>
           {TIPOS_ESTABLECIMIENTO.map(t => <option key={t.codigo} value={t.codigo}>{t.codigo} · {t.nombre}</option>)}
@@ -79,7 +73,9 @@ export function EmisorFields({ e, setE, requirePasswords, showPasswords = true }
         </Select>
       </Field>
       <Field label="Dirección (complemento)"><Input {...f('emisor_complemento')} placeholder="Calle, número, colonia" /></Field>
-      <Field label="Teléfono"><Input {...f('emisor_telefono')} /></Field>
+      <Field label="Teléfono (lo exige el CCF)" error={e.emisor_telefono && e.emisor_telefono.trim().length < 8 ? 'Mínimo 8 caracteres' : undefined}>
+        <Input {...f('emisor_telefono')} placeholder="2222-2222" />
+      </Field>
       <Field label="Email para facturación"><Input type="email" {...f('emisor_email')} /></Field>
       <Field label="Ambiente del MH">
         <Select value={e.mh_env} onChange={ev => setE({ ...e, mh_env: ev.target.value as Emisor['mh_env'] })}>

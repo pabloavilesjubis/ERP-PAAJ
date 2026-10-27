@@ -48,7 +48,7 @@ const CompleteBody = z.object({
     emisor_departamento: z.string().regex(/^\d{2}$/),
     emisor_municipio: z.string().regex(/^\d{2}$/),
     emisor_complemento: z.string().min(1),
-    emisor_telefono: z.string().nullable().optional(),
+    emisor_telefono: z.string().trim().min(8),  // el CCF lo exige del emisor
     emisor_email: z.string().email(),
     punto_venta_establecimiento: z.string().regex(/^[A-Z0-9]{4}$/),
     punto_venta_punto: z.string().regex(/^[A-Z0-9]{4}$/),

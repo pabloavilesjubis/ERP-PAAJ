@@ -1,12 +1,13 @@
 import { findActividad } from '@/lib/catalogos/mh';
+import { faltantesCcf } from './receptor-ccf';
 import type { Contribuyente, Producto } from '@/types/domain';
 import type { DteTipo } from './client';
 
 /**
  * Helpers para convertir el carrito del POS al shape que espera el dte-service
- * (que a su vez los pasa a sus builders y a AJV). Este archivo NO valida —
- * AJV en el dte-service es la fuente de verdad. Aquí sólo armamos defaults
- * razonables para campos requeridos.
+ * (que a su vez los pasa a sus builders y a AJV). AJV en el dte-service es la
+ * fuente de verdad; aquí solo se frena antes un CCF/NC cuyo receptor no tiene
+ * los datos mínimos (receptor-ccf.ts), en vez de rellenarlos con datos falsos.
  */
 
 export interface CartLine {
@@ -209,19 +210,21 @@ function receptorFcfFromContribuyente(c: Contribuyente): Record<string, unknown>
 }
 
 function receptorCcfFromContribuyente(c: Contribuyente): Record<string, unknown> {
-  const actividad = resolveActividad(c) ?? { codigo: '47711', nombre: 'Comercio' };
+  // Sin datos inventados: un CCF con correo o dirección de relleno sale
+  // sellado con información falsa del cliente.
+  const faltan = faltantesCcf(c);
+  if (faltan.length) throw new Error(`Al cliente ${c.nombre || ''} le faltan datos para CCF: ${faltan.join(', ')}. Complétalos en Contribuyentes.`);
+  const actividad = resolveActividad(c)!;
   return {
-    nit: (c.nit ?? '').replace(/-/g, ''),
-    nrc: (c.nrc ?? '').replace(/-/g, ''),
-    nombre: c.nombre,
+    nit: (c.nit ?? '').replace(/\D/g, ''),
+    nrc: (c.nrc ?? '').replace(/\D/g, ''),
+    nombre: c.nombre.trim(),
     codActividad: actividad.codigo,
-    descActividad: actividad.nombre,
+    descActividad: actividad.nombre.slice(0, 150),
     nombreComercial: null,
-    telefono: c.telefono || null,
-    correo: c.email || 'sin-correo@example.sv',
-    direccion: addressFromContribuyente(c) ?? {
-      departamento: '06', municipio: '14', complemento: 'San Salvador',
-    },
+    telefono: c.telefono?.trim() || null,
+    correo: c.email!.trim(),
+    direccion: addressFromContribuyente(c),
   };
 }
 

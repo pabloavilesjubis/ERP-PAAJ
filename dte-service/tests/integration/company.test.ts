@@ -7,7 +7,7 @@ import { auth, buildApp, createTenant, hasDb, type TestTenant } from './helpers.
 const EMISOR = {
   mh_env: 'sandbox', mh_nit: '0614-010126-109-8', emisor_nrc: '1234-5', emisor_nombre: 'MI EMPRESA S.A. DE C.V.', emisor_cod_actividad: '46900',
   emisor_desc_actividad: 'Comercio', emisor_tipo_establecimiento: '02', emisor_departamento: '06', emisor_municipio: '14',
-  emisor_complemento: 'San Salvador', emisor_email: 'fe@miempresa.test', punto_venta_establecimiento: 'm001', punto_venta_punto: 'P001',
+  emisor_complemento: 'San Salvador', emisor_telefono: '2222-0000', emisor_email: 'fe@miempresa.test', punto_venta_establecimiento: 'm001', punto_venta_punto: 'P001',
 };
 const CERT = Buffer.from(`<CertificadoMH><nit>06140101261098</nit><publicKey>${'A'.repeat(200)}</publicKey></CertificadoMH>`).toString('base64');
 

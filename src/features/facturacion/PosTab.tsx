@@ -8,7 +8,7 @@ import { fmt, newId, num } from '@/lib/utils/format';
 import { useDataStore } from '@/stores/data.store';
 import { env } from '@/config/env';
 import {
-  ACTIVIDADES_ECONOMICAS, DEPARTAMENTOS, getMunicipiosFor,
+  DEPARTAMENTOS, findActividad, getMunicipiosFor,
 } from '@/lib/catalogos/mh';
 import { tipoDteToCodigo } from '@/lib/dte/correlativos';
 import { peekCorrelativo, type CorrelativoRecord } from '@/lib/dte/correlativos-client';
@@ -23,6 +23,8 @@ import {
   DteServiceError, emitDte, pingDteService, type DteEmitSuccess, type DteTipo,
 } from '@/lib/dte/client';
 import type { Contribuyente, Producto, VentaConsumidor, VentaContribuyente } from '@/types/domain';
+import { faltantesCcf } from '@/lib/dte/receptor-ccf';
+import { ActividadField } from '@/features/contribuyentes/ActividadField';
 
 type ClienteAddTipo = 'consumidor' | 'contribuyente';
 
@@ -32,10 +34,9 @@ interface ClienteForm {
   nit: string;
   dui: string;
   nrc: string;
-  /** Código actividad económica (CAT-019). 'otro' habilita modo libre. */
+  /** Código actividad económica (CAT-019). */
   codActividad: string;
-  /** Descripción libre cuando codActividad === 'otro' o cuando se necesita
-   *  ajustar el descActividad propuesto por el catálogo. */
+  /** Descripción de la actividad: la del catálogo, o libre si el código no está en él. */
   giro: string;
   /** Código departamento (CAT-012). */
   departamento: string;
@@ -156,15 +157,10 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [contribuyentes]);
 
-  // CCF exige contribuyente formal (NIT + NRC). FCF y FSE aceptan cualquier
-  // cliente — incluso consumidores con sólo DUI o sin doc.
+  // CCF exige el receptor completo (NIT, NRC, actividad, dirección, correo).
+  // FCF y FSE aceptan cualquier cliente — incluso consumidores con sólo DUI o sin doc.
   const clientesElegibles = useMemo(() => {
-    if (tipoDte === 'ccf') {
-      return baseClientes.filter(c =>
-        (c.nit ?? '').replace(/-/g, '').trim()
-        && (c.nrc ?? '').replace(/-/g, '').trim(),
-      );
-    }
+    if (tipoDte === 'ccf') return baseClientes.filter(c => faltantesCcf(c).length === 0);
     return baseClientes;
   }, [baseClientes, tipoDte]);
 
@@ -216,19 +212,9 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
   async function saveCliente() {
     const f = clienteForm;
     if (!f.nombre.trim()) return;
-    if (f.tipo === 'contribuyente' && (!f.nit.trim() || !f.nrc.trim())) return;
-
-    // Si eligió actividad del catálogo, derivamos giro/codActividad del catálogo;
-    // si eligió "otro" el usuario escribe ambos a mano.
-    let codActividad: string | undefined;
-    let giroDescriptivo: string | undefined;
-    if (f.codActividad && f.codActividad !== 'otro') {
-      const cat = ACTIVIDADES_ECONOMICAS.find(a => a.codigo === f.codActividad);
-      codActividad = f.codActividad;
-      giroDescriptivo = cat?.nombre ?? f.giro.trim() ?? undefined;
-    } else if (f.giro.trim()) {
-      giroDescriptivo = f.giro.trim();
-    }
+    if (!clienteFormValid) return;
+    const codActividad = f.codActividad.trim() || undefined;
+    const giroDescriptivo = (findActividad(f.codActividad)?.nombre ?? f.giro).trim() || undefined;
 
     const nuevo: Contribuyente = {
       id: newId(),
@@ -256,13 +242,8 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
   const clienteFormValid = (() => {
     if (!clienteForm.nombre.trim()) return false;
     if (clienteForm.tipo === 'consumidor') return true;
-    // Contribuyente: requiere todo lo que el schema CCF exige no-nullable.
-    if (!clienteForm.nit.trim() || !clienteForm.nrc.trim()) return false;
-    if (!clienteForm.email.trim()) return false;
-    if (!clienteForm.departamento || !clienteForm.municipio) return false;
-    if (!clienteForm.codActividad) return false;
-    if (clienteForm.codActividad === 'otro' && !clienteForm.giro.trim()) return false;
-    return true;
+    // Contribuyente: todo lo que el schema CCF exige del receptor.
+    return faltantesCcf(clienteForm).length === 0;
   })();
 
   async function emit() {
@@ -657,7 +638,7 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
             <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>
               {clientesElegibles.length} disponible{clientesElegibles.length === 1 ? '' : 's'}
               {tipoDte === 'ccf' && baseClientes.length > clientesElegibles.length
-                && ` · ${baseClientes.length - clientesElegibles.length} sin NIT/NRC`}
+                && ` · ${baseClientes.length - clientesElegibles.length} con datos incompletos para CCF`}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -689,7 +670,7 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
           </div>
           {clientesElegibles.length === 0 && tipoDte === 'ccf' && baseClientes.length > 0 && (
             <div style={{ fontSize: 10, color: 'var(--warning-text)', marginTop: 4 }}>
-              Tus clientes existentes no tienen NIT+NRC completos. CCF los exige.
+              Tus clientes no tienen completos los datos que exige el CCF (NIT, NRC, actividad, dirección y correo). Complétalos en Contribuyentes.
             </div>
           )}
           {clientesElegibles.length === 0 && baseClientes.length === 0 && (
@@ -1014,50 +995,10 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
                   />
                 </Field>
               </div>
-              <Field label="Actividad económica (CAT-019 del MH)">
-                <Select
-                  value={clienteForm.codActividad}
-                  onChange={e => {
-                    const codigo = e.target.value;
-                    const cat = ACTIVIDADES_ECONOMICAS.find(a => a.codigo === codigo);
-                    setClienteForm(p => ({
-                      ...p,
-                      codActividad: codigo,
-                      // Auto-rellena la descripción si viene del catálogo.
-                      giro: cat ? cat.nombre : (codigo === 'otro' ? p.giro : ''),
-                    }));
-                  }}
-                >
-                  <option value="">— Selecciona una actividad —</option>
-                  {ACTIVIDADES_ECONOMICAS.map(a => (
-                    <option key={a.codigo} value={a.codigo}>
-                      {a.codigo} — {a.nombre}
-                    </option>
-                  ))}
-                  <option value="otro">Otra (ingresar manualmente)</option>
-                </Select>
-              </Field>
-
-              {clienteForm.codActividad === 'otro' && (
-                <div className="two-col">
-                  <Field label="Código de actividad (2-6 dígitos) *">
-                    <Input
-                      type="text"
-                      placeholder="46900"
-                      value={clienteForm.giro && /^\d{2,6}$/.test(clienteForm.giro) ? clienteForm.giro : ''}
-                      onChange={e => setClienteForm(p => ({ ...p, codActividad: e.target.value.replace(/\D/g, '').slice(0, 6) || 'otro' }))}
-                    />
-                  </Field>
-                  <Field label="Descripción de actividad *">
-                    <Input
-                      type="text"
-                      placeholder="Mi actividad económica"
-                      value={clienteForm.giro}
-                      onChange={e => setClienteForm(p => ({ ...p, giro: e.target.value }))}
-                    />
-                  </Field>
-                </div>
-              )}
+              <div className="two-col">
+                <ActividadField required codigo={clienteForm.codActividad} descripcion={clienteForm.giro}
+                  onChange={(codActividad, giro) => setClienteForm(p => ({ ...p, codActividad, giro }))} />
+              </div>
 
               <div className="two-col">
                 <Field label="Departamento (CAT-012) *">
@@ -1099,7 +1040,7 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
                 </Field>
               </div>
 
-              <Field label="Dirección (calle, colonia, número)">
+              <Field label="Dirección (calle, colonia, número) *">
                 <Input
                   type="text"
                   placeholder="Col. Escalón, Calle Los Almendros #15"
@@ -1128,8 +1069,9 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
                 fontSize: 'var(--text-xs)', color: 'var(--fg-3)',
                 background: 'var(--surface-2)', padding: 8, borderRadius: 'var(--r-md)',
               }}>
-                Los campos marcados con <strong>*</strong> son requeridos por el portal del MH para emitir CCF.
-                El correo no puede ser nulo en CCF.
+                Los campos marcados con <strong>*</strong> son los que el MH exige para emitir CCF.
+                {clienteForm.tipo === 'contribuyente' && faltantesCcf(clienteForm).length > 0
+                  && <> Falta: {faltantesCcf(clienteForm).join(', ')}.</>}
               </div>
             </>
           )}

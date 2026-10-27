@@ -31,7 +31,8 @@ export const EmisorInput = z.object({
   emisor_departamento: z.string().trim().regex(/^\d{2}$/, 'Elige el departamento'),
   emisor_municipio: z.string().trim().regex(/^\d{2}$/, 'Elige el municipio'),
   emisor_complemento: z.string().trim().min(1, 'Indica la dirección'),
-  emisor_telefono: z.string().trim().nullable().optional().transform(v => v || null),
+  // El schema del CCF exige teléfono del emisor (no nullable, mínimo 8)
+  emisor_telefono: z.string({ required_error: 'Indica el teléfono (lo exige el CCF)' }).trim().min(8, 'El teléfono debe tener al menos 8 caracteres'),
   emisor_email: z.string().trim().email('Email del emisor inválido'),
   punto_venta_establecimiento: code4,
   punto_venta_punto: code4,
