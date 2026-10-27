@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useDataStore } from '@/stores/data.store';
+import { usesTenantDteApi } from '@/lib/dte/tenant-routing';
 
 /**
  * Botón para forzar la sincronización de DTEs emitidos vía API externa (BEON,
@@ -16,6 +17,9 @@ export function SyncDtesButton({ compact }: { compact?: boolean }) {
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
+
+  // Solo PAAJ tiene DTEs emitidos por fuera de la UI (BEON) que traer
+  if (usesTenantDteApi()) return null;
 
   async function run(full: boolean) {
     setSyncing(true);

@@ -1,4 +1,5 @@
 import { ackDteSync, listDtes, type DteListedRecord } from './client';
+import { usesTenantDteApi } from './tenant-routing';
 import type { AppData, VentaConsumidor, VentaContribuyente } from '@/types/domain';
 import { newId } from '@/lib/utils/format';
 
@@ -70,6 +71,10 @@ export async function syncDtesFromApi(
   // `full: true` ignora el cursor incremental — trae TODO lo que tiene el
   // server. Útil como botón de re-import manual. Sigue siendo idempotente
   // (dedup por codigoGeneracion).
+  // /dte/listar es el almacén single-tenant de PAAJ: otra empresa nunca debe importarlo
+  if (usesTenantDteApi()) {
+    return { ok: false, fetched: 0, added: 0, updated: 0, skipped: 0, error: 'No aplica: los DTEs de esta empresa ya se guardan al emitir' };
+  }
   let response;
   try {
     const since = opts.full ? undefined : computeSince(getData());

@@ -5,7 +5,9 @@ import { buildCcf, type CcfInput } from '../dte/builders/ccf.js';
 import { buildFcf, type FcfInput } from '../dte/builders/fcf.js';
 import { buildFse, type FseInput } from '../dte/builders/fse.js';
 import { buildNc, type NcInput } from '../dte/builders/nc.js';
+import { buildAnulacion, type AnulacionInput } from '../dte/builders/anulacion.js';
 import { firmar } from '../signing/firmador.js';
+import { annulDte } from '../mh/annul.js';
 import { submitDte } from '../mh/submit.js';
 import path from 'node:path';
 import { buildDteFiles } from '../beon/pdf.js';
@@ -209,6 +211,10 @@ export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void 
         estado: result.estado,
         selloRecibido: result.selloRecibido,
         consecutivo,
+        // Igual que /emit: el POS usa el JWS y el JSON para el ticket y el PDF
+        dte,
+        documento,
+        mh: result.raw,
       });
     } catch (e) {
       if (reservadoPorNosotros) {
@@ -217,6 +223,52 @@ export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void 
       }
       throw e;
     }
+  });
+
+  // ── POST /v2/dte/annul ────────────────────────────────────────────────────
+  // Anulación con el NIT y el certificado de la empresa de la sesión; solo
+  // DTEs emitidos por esa misma empresa.
+  app.post('/v2/dte/annul', async (req, reply) => {
+    const tenantId = req.tenantId!;
+    const partial = req.body as Partial<AnulacionInput> | null | undefined;
+    if (!partial?.tipoDte || !partial.codigoGeneracion || !partial.selloRecibido
+        || !partial.numeroControl || !partial.fecEmi || partial.montoIva === undefined
+        || !partial.tipoAnulacion || !partial.motivoAnulacion
+        || !partial.nombreResponsable || !partial.tipDocResponsable || !partial.numDocResponsable
+        || !partial.nombreSolicita || !partial.tipDocSolicita || !partial.numDocSolicita
+        || !partial.tipoDocumentoReceptor || !partial.numDocumentoReceptor || !partial.nombreReceptor) {
+      throw new ValidationError('Faltan campos obligatorios para anular');
+    }
+    const own = await query<{ estado: string }>('SELECT estado FROM dtes WHERE tenant_id = $1 AND codigo_generacion = $2',
+      [tenantId, partial.codigoGeneracion]);
+    if (!own.rows.length) throw new ValidationError('Ese DTE no fue emitido por esta empresa');
+    if (own.rows[0]!.estado === 'ANULADO') throw new ValidationError('El DTE ya está anulado');
+
+    const emisor = await getEmisor(tenantId);
+    if (!emisor) throw new ValidationError('tenant_emisor no configurado', { tenantId });
+    const tenantCfg = configForTenant(globalCfg, emisor);
+    const evento = buildAnulacion(tenantCfg, partial as AnulacionInput);
+    validateAgainstSchema('anulacion', evento);
+    const documento = await firmar(tenantCfg, evento);
+    const result = await annulDte({ cfg: tenantCfg, documento });
+
+    const anulacion = {
+      codigo_generacion_evento: evento.identificacion.codigoGeneracion,
+      sello_evento: result.selloRecibido,
+      fec_anula: evento.identificacion.fecAnula,
+      motivo: partial.motivoAnulacion,
+    };
+    await query(`UPDATE dtes SET estado = 'ANULADO', anulacion = $3::JSONB, updated_at = NOW()
+                  WHERE tenant_id = $1 AND codigo_generacion = $2`, [tenantId, partial.codigoGeneracion, JSON.stringify(anulacion)]);
+    await query(`INSERT INTO audit_events (tenant_id, user_id, event_type, payload) VALUES ($1, $2, 'DTE_ANULADO', $3::JSONB)`,
+      [tenantId, req.auth?.userId ?? null, JSON.stringify({ codigoGeneracion: partial.codigoGeneracion, ...anulacion })]);
+    req.log.info({ tenantId, codigoGeneracionEvento: anulacion.codigo_generacion_evento, dteAnulado: partial.codigoGeneracion }, 'DTE anulado (v2)');
+
+    return reply.send({
+      codigoGeneracionEvento: anulacion.codigo_generacion_evento,
+      selloEvento: result.selloRecibido,
+      mh: result.raw,
+    });
   });
 
   // ── GET /v2/dte/listar ────────────────────────────────────────────────────

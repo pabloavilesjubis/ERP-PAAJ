@@ -1,4 +1,5 @@
 import { env } from '@/config/env';
+import { dteAuthHeaders, usesTenantDteApi } from './tenant-routing';
 import type { TipoDteCode } from '@/types/domain';
 
 /**
@@ -26,13 +27,26 @@ function baseUrl(): string {
   return env.dteServiceUrl.replace(/\/$/, '');
 }
 
+/** Correlativos de la empresa de la sesión (rutas /v2, ver tenant-routing.ts). */
+async function listarTenant(): Promise<CorrelativoRecord[]> {
+  const res = await fetch(`${baseUrl()}/v2/correlativos/listar`, { headers: dteAuthHeaders() });
+  if (!res.ok) throw new Error(`listar: HTTP ${res.status}`);
+  return (await res.json() as { items: CorrelativoRecord[] }).items;
+}
+
+const notSeeded = (tipoDte: string): CorrelativoRecord => ({
+  tipo_dte: tipoDte, seeded: false, seeded_at: null, seeded_by: null, ultimo_consumido: 0, reservados: [], updated_at: '',
+});
+
 export async function peekCorrelativo(tipoDte: TipoDteCode): Promise<CorrelativoRecord> {
+  if (usesTenantDteApi()) return (await listarTenant()).find(r => r.tipo_dte === tipoDte) ?? notSeeded(tipoDte);
   const res = await fetch(`${baseUrl()}/correlativos/peek?tipo_dte=${tipoDte}`);
   if (!res.ok) throw new Error(`peek ${tipoDte}: HTTP ${res.status}`);
   return res.json();
 }
 
 export async function listarCorrelativos(): Promise<CorrelativoRecord[]> {
+  if (usesTenantDteApi()) return listarTenant();
   const res = await fetch(`${baseUrl()}/correlativos/listar`);
   if (!res.ok) throw new Error(`listar: HTTP ${res.status}`);
   const body = await res.json() as { items: CorrelativoRecord[] };
@@ -60,6 +74,14 @@ export async function sembrarCorrelativos(
   items: Array<{ tipo_dte: TipoDteCode; ultimo_consumido: number }>,
   seededBy?: string,
 ): Promise<{ resultados: SembrarResult[] }> {
+  if (usesTenantDteApi()) {
+    // Mismo endpoint que Mi empresa: exige company:manage y nunca baja el número
+    const r = await fetch(`${baseUrl()}/v2/company/correlativos`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...dteAuthHeaders() }, body: JSON.stringify({ items }),
+    });
+    if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { message?: string } | null)?.message ?? `sembrar: HTTP ${r.status}`);
+    return { resultados: [] };
+  }
   const res = await fetch(`${baseUrl()}/correlativos/sembrar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

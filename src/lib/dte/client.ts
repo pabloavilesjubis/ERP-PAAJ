@@ -1,4 +1,5 @@
 import { env } from '@/config/env';
+import { dteAuthHeaders, usesTenantDteApi } from './tenant-routing';
 
 /**
  * Cliente HTTP para el microservicio `dte-service` (Node/TS) que firma y
@@ -53,7 +54,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   try {
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...dteAuthHeaders() },
       body: JSON.stringify(body),
     });
   } catch (e) {
@@ -85,7 +86,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
 /** Emite un DTE (FCF/CCF/NC/FSE). */
 export function emitDte(req: DteEmitRequest): Promise<DteEmitSuccess> {
-  return postJson<DteEmitSuccess>('/emit', req);
+  return postJson<DteEmitSuccess>(usesTenantDteApi() ? '/v2/dte/emit' : '/emit', req);
 }
 
 /** Anula un DTE previamente emitido. */
@@ -94,7 +95,7 @@ export function annulDte(payload: Record<string, unknown>): Promise<{
   selloEvento: string | null;
   mh: Record<string, unknown>;
 }> {
-  return postJson('/annul', payload);
+  return postJson(usesTenantDteApi() ? '/v2/dte/annul' : '/annul', payload);
 }
 
 /**
