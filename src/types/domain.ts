@@ -170,7 +170,15 @@ export interface CompraMetadata {
    * con tope de $30 (sobre techo cotizable de $1000).
    */
   isssRetenido?: string;
-  source?: 'manual' | 'imported';
+  /** 'pos' = FSE emitido desde el POS (CIPA compra al sujeto excluido). */
+  source?: 'manual' | 'imported' | 'pos';
+  /** JWS del FSE emitido — preserva el JSON original (PDF/JSON en DTEs emitidos). */
+  documentoJws?: string;
+  anulado?: boolean;
+  codigoEventoAnulacion?: string;
+  selloEventoAnulacion?: string;
+  fechaAnulacion?: string;
+  motivoAnulacion?: string;
   // Archivo PDF adjunto (Supabase Storage):
   pdfPath?: string;              // path relativo dentro del bucket "compras-pdfs"
   pdfFilename?: string;          // nombre original del archivo para mostrar

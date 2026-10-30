@@ -11,14 +11,14 @@ import { annulDte, DteServiceError } from '@/lib/dte/client';
 import { downloadDtePdf, downloadDteTicket, extractPdfData } from '@/lib/dte/pdf';
 import type { VentaConsumidor, VentaContribuyente } from '@/types/domain';
 
-type TipoDte = 'fcf' | 'ccf';
+type TipoDte = 'fcf' | 'ccf' | 'fse';
 type FilterTipo = 'todos' | TipoDte;
 type FilterEstado = 'todos' | 'procesado' | 'anulado';
 
-/** Vista unificada de DTEs emitidos (combina FCF y CCF). */
+/** Vista unificada de DTEs emitidos: FCF y CCF (ventas) y FSE (compras al sujeto excluido). */
 interface DteEmitido {
   ventaId: string;
-  origenColeccion: 'ventasConsumidor' | 'ventasContribuyente';
+  origenColeccion: 'ventasConsumidor' | 'ventasContribuyente' | 'compras';
   tipo: TipoDte;
   fecha: string;
   cliente: string;
@@ -42,6 +42,7 @@ interface DtesEmitidosTabProps {
 export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
   const ventasConsumidor = useDataStore(s => s.data.ventasConsumidor);
   const ventasContribuyente = useDataStore(s => s.data.ventasContribuyente);
+  const compras = useDataStore(s => s.data.compras);
   const patch = useDataStore(s => s.patch);
 
   const [filterTipo, setFilterTipo] = useState<FilterTipo>('todos');
@@ -89,8 +90,26 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
           receptorTipoDocumento: '36',
         };
       });
-    return [...fromFcf, ...fromCcf].sort((a, b) => b.fecha.localeCompare(a.fecha));
-  }, [ventasConsumidor, ventasContribuyente]);
+    const fromFse: DteEmitido[] = compras
+      .filter(c => c.metadata?.tipoDocumento === '14' && c.metadata?.documentoJws)
+      .map(c => ({
+        ventaId: c.id,
+        origenColeccion: 'compras',
+        tipo: 'fse' as const,
+        fecha: c.fecha,
+        cliente: c.proveedor,
+        total: num(c.monto),
+        codigoGeneracion: c.metadata?.numeroDocumento ?? '',
+        numeroControl: c.metadata?.numeroControl ?? '',
+        selloRecibido: c.metadata?.selloRecibido ?? null,
+        anulado: !!c.metadata?.anulado,
+        documentoJws: c.metadata?.documentoJws,
+        montoIva: 0,
+        nit: c.metadata?.nit,
+        dui: c.metadata?.dui,
+      }));
+    return [...fromFcf, ...fromCcf, ...fromFse].sort((a, b) => b.fecha.localeCompare(a.fecha));
+  }, [ventasConsumidor, ventasContribuyente, compras]);
 
   const filtered = useMemo(() => {
     return dtes.filter(d => {
@@ -181,6 +200,7 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
           <option value="todos">Todos los tipos</option>
           <option value="fcf">Solo FCF</option>
           <option value="ccf">Solo CCF</option>
+          <option value="fse">Solo FSE</option>
         </Select>
         <Select
           value={filterEstado}
@@ -219,7 +239,7 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
                   <EmptyState
                     title={dtes.length === 0 ? 'Sin DTEs emitidos' : 'Sin resultados'}
                     description={dtes.length === 0
-                      ? 'Cuando emitas un FCF o CCF desde el POS, aparecerá aquí.'
+                      ? 'Cuando emitas un FCF, CCF o FSE desde el POS, aparecerá aquí.'
                       : 'Cambia los filtros o búsqueda.'}
                   />
                 </td></tr>
@@ -278,6 +298,26 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
           onClose={() => setAnulando(null)}
           onAnulado={async (resultado) => {
             await patch(prev => {
+              if (anulando.origenColeccion === 'compras') {
+                return {
+                  ...prev,
+                  compras: prev.compras.map(c =>
+                    c.id === anulando.ventaId
+                      ? {
+                          ...c,
+                          metadata: {
+                            ...c.metadata,
+                            anulado: true,
+                            codigoEventoAnulacion: resultado.codigoGeneracionEvento,
+                            selloEventoAnulacion: resultado.selloEvento ?? undefined,
+                            fechaAnulacion: new Date().toISOString(),
+                            motivoAnulacion: resultado.motivo,
+                          },
+                        }
+                      : c,
+                  ),
+                };
+              }
               if (anulando.origenColeccion === 'ventasConsumidor') {
                 return {
                   ...prev,
@@ -450,7 +490,7 @@ function AnularModal({
     setError(null);
     try {
       const payload = {
-        tipoDte: dte.tipo === 'ccf' ? '03' : '01',
+        tipoDte: ({ fcf: '01', ccf: '03', fse: '14' } as const)[dte.tipo],
         codigoGeneracion: dte.codigoGeneracion,
         selloRecibido: dte.selloRecibido ?? '',
         numeroControl: dte.numeroControl,

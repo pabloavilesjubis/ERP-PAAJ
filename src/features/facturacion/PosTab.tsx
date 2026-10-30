@@ -22,7 +22,7 @@ import {
 import {
   DteServiceError, emitDte, pingDteService, type DteEmitSuccess, type DteTipo,
 } from '@/lib/dte/client';
-import type { Contribuyente, Producto, VentaConsumidor, VentaContribuyente } from '@/types/domain';
+import type { Compra, Contribuyente, Producto, VentaConsumidor, VentaContribuyente } from '@/types/domain';
 import { faltantesCcf } from '@/lib/dte/receptor-ccf';
 import { ActividadField } from '@/features/contribuyentes/ActividadField';
 
@@ -436,10 +436,38 @@ export function PosTab({ ncContext }: PosTabProps = {}) {
         ...prev,
         ventasContribuyente: [...prev.ventasContribuyente, venta],
       }));
+    } else if (tipo === 'fse' && cliente) {
+      // El FSE documenta una COMPRA al sujeto excluido: entra a Compras del mes,
+      // sin IVA, con el total y la retención de renta que quedaron en el DTE.
+      const resumen = (emitResult.dte?.resumen ?? {}) as { totalCompra?: number; reteRenta?: number };
+      const reteRenta = Number(resumen.reteRenta ?? 0);
+      const dui = (cliente.dui ?? '').replace(/\D/g, '');
+      const nit = (cliente.nit ?? '').replace(/\D/g, '');
+      const compra: Compra = {
+        id: newId(),
+        fecha,
+        proveedor: cliente.nombre,
+        nrc: '',
+        descripcion,
+        monto: Number(resumen.totalCompra ?? totals.total).toFixed(2),
+        ivaCredito: '0.00',
+        notas: '',
+        metadata: {
+          source: 'pos',
+          claseDocumento: '4',
+          tipoDocumento: '14',
+          numeroDocumento: emitResult.codigoGeneracion,
+          numeroControl: emitResult.numeroControl,
+          selloRecibido: emitResult.selloRecibido ?? undefined,
+          dui: dui || undefined,
+          nit: nit || undefined,
+          tipoPersona: 'natural',
+          retencionRenta: reteRenta > 0 ? reteRenta.toFixed(2) : undefined,
+          documentoJws,
+        },
+      };
+      await patch(prev => ({ ...prev, compras: [...prev.compras, compra] }));
     }
-    // FSE no persistimos como venta (es comprobante de COMPRA al sujeto
-    // excluido). La compra correspondiente se registra desde el módulo de
-    // Compras manualmente, vinculándola con el codigoGeneracion devuelto.
   }
 
   const canEmit = cart.length > 0
