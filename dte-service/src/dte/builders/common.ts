@@ -120,17 +120,40 @@ export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+const UNIDADES = ['', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ',
+  'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE', 'VEINTE',
+  'VEINTIUNO', 'VEINTIDÓS', 'VEINTITRÉS', 'VEINTICUATRO', 'VEINTICINCO', 'VEINTISÉIS', 'VEINTISIETE', 'VEINTIOCHO', 'VEINTINUEVE'];
+const DECENAS = ['', '', '', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+const CENTENAS = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS',
+  'OCHOCIENTOS', 'NOVECIENTOS'];
+
+/** 0..999 en letras ("" para 0). */
+function centenas(n: number): string {
+  if (n === 100) return 'CIEN';
+  const c = Math.floor(n / 100), r = n % 100;
+  const resto = r < 30 ? UNIDADES[r]! : `${DECENAS[Math.floor(r / 10)]}${r % 10 ? ` Y ${UNIDADES[r % 10]}` : ''}`;
+  return [CENTENAS[c], resto].filter(Boolean).join(' ');
+}
+
+/** Entero en letras, con "UN" delante de MIL/MILLÓN ("VEINTIÚN MIL", no "VEINTIUNO MIL"). */
+function enteroEnLetras(n: number): string {
+  if (n === 0) return 'CERO';
+  const apocope = (t: string) => t.replace(/VEINTIUNO$/, 'VEINTIÚN').replace(/UNO$/, 'UN');
+  const millones = Math.floor(n / 1_000_000), miles = Math.floor((n % 1_000_000) / 1000), resto = n % 1000;
+  const partes: string[] = [];
+  if (millones) partes.push(millones === 1 ? 'UN MILLÓN' : `${apocope(enteroEnLetras(millones))} MILLONES`);
+  if (miles) partes.push(miles === 1 ? 'MIL' : `${apocope(centenas(miles))} MIL`);
+  if (resto) partes.push(centenas(resto));
+  return partes.join(' ');
+}
+
 /**
- * Convierte un monto a su representación en letras según convención del MH.
- * NOTA: implementación placeholder — para producción reemplaza por
- * `numero-a-letras` (npm) o un helper interno equivalente. El MH valida que
- * `totalLetras` no sea vacío; el contenido específico no se valida estrictamente
- * en sandbox pero conviene cumplir la convención.
+ * Monto en letras según la convención de los DTE del MH:
+ * 555.56 → "QUINIENTOS CINCUENTA Y CINCO 56/100 DÓLARES".
  */
 export function totalEnLetras(monto: number): string {
-  const fixed = monto.toFixed(2);
-  const [enteros, decimales] = fixed.split('.');
-  return `${enteros} 00/${decimales} DÓLARES`;
+  const [enteros, decimales] = Math.abs(monto).toFixed(2).split('.');
+  return `${enteroEnLetras(Number(enteros))} ${decimales}/100 DÓLARES`;
 }
 
 function pad2(n: number): string {
