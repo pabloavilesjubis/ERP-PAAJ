@@ -20,6 +20,7 @@ import { ensureContribuyente } from '@/lib/utils/contribuyentes';
 import { describeDuplicate, findDuplicate } from '@/lib/utils/duplicates';
 import { deleteCompraPdf, openCompraPdf, uploadCompraPdf } from '@/lib/supabase/storage';
 import { useDataStore } from '@/stores/data.store';
+import { CompraArchivos } from './CompraArchivos';
 import { usePeriodStore } from '@/stores/period.store';
 import type {
   ClaseDocumento, Compra, CompraMetadata, ReporteGenerado,
@@ -407,8 +408,18 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       ? (form.retencionRenta || (baseGravada * RETENCION_RENTA_PCT).toFixed(2))
       : '';
 
+    // Al editar se conserva lo que el formulario no maneja: el DTE firmado de un
+    // FSE emitido, su anulación, el origen y los adjuntos del backend.
+    const previo = editId ? data.compras.find(c => c.id === editId) : undefined;
+    const pm = previo?.metadata ?? {};
     const metadata: CompraMetadata = {
-      source: 'manual',
+      source: pm.source ?? 'manual',
+      documentoJws: pm.documentoJws,
+      anulado: pm.anulado,
+      codigoEventoAnulacion: pm.codigoEventoAnulacion,
+      selloEventoAnulacion: pm.selloEventoAnulacion,
+      fechaAnulacion: pm.fechaAnulacion,
+      motivoAnulacion: pm.motivoAnulacion,
       claseDocumento: form.claseDocumento,
       tipoDocumento: form.tipoDocumento,
       numeroDocumento: form.numeroDocumento,
@@ -459,6 +470,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       ivaCredito: ivaAuto,
       notas: form.notas,
       metadata,
+      adjuntos: previo?.adjuntos,
     };
 
     // Asegura que el proveedor exista en Contribuyentes (lo crea o lo asciende
@@ -551,7 +563,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                 <th className="num">IVA crédito</th>
                 <th className="num">Total</th>
                 <th className="num">Retención</th>
-                <th style={{ width: 80 }} />
+                <th style={{ width: 100 }} />
               </tr>
             </thead>
             <tbody>
@@ -585,20 +597,12 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                         : <span style={{ color: 'var(--fg-4)' }}>—</span>}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 'var(--s-1)', justifyContent: 'flex-end', alignItems: 'center' }}>
-                        {m.pdfPath && (
-                          <button
-                            className="btn-icon"
-                            style={{ color: 'var(--brand-primary-700)' }}
-                            onClick={() => openCompraPdf(m.pdfPath!)}
-                            aria-label="Ver PDF"
-                            title={m.pdfFilename ?? 'Ver PDF adjunto'}
-                          >
-                            <Icon name="file-text" size={14} />
-                          </button>
-                        )}
-                        <button className="btn-icon" onClick={() => openEdit(r)} aria-label="Editar"><Icon name="edit" size={14}/></button>
-                        <button className="btn-icon" style={{ color: 'var(--danger-text)' }} onClick={() => del(r.id)} aria-label="Eliminar"><Icon name="trash" size={14}/></button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                        <CompraArchivos compra={r} />
+                        <div style={{ display: 'flex', gap: 'var(--s-1)' }}>
+                          <button className="btn-icon" onClick={() => openEdit(r)} aria-label="Editar"><Icon name="edit" size={14}/></button>
+                          <button className="btn-icon" style={{ color: 'var(--danger-text)' }} onClick={() => del(r.id)} aria-label="Eliminar"><Icon name="trash" size={14}/></button>
+                        </div>
                       </div>
                     </td>
                   </tr>

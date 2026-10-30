@@ -102,7 +102,13 @@ export function registerV2EntityRoutes(app: FastifyInstance): void {
     let where = 'WHERE tenant_id = $1';
     if (q.since) { params.push(q.since); where += ` AND fecha >= $${params.length}`; }
     const limit = Math.min(parseInt(q.limit ?? '5000', 10) || 5000, 50000);
-    const res = await query(`SELECT * FROM compras ${where} ORDER BY fecha DESC, id DESC LIMIT ${limit}`, params);
+    // Qué adjuntos tiene cada compra (sin el contenido). Tolera la migración 015 sin aplicar.
+    const hasAdj = (await query<{ t: string | null }>("SELECT to_regclass('public.compra_adjuntos') AS t")).rows[0]?.t;
+    const adj = hasAdj
+      ? `(SELECT jsonb_object_agg(a.kind, jsonb_build_object('filename', a.filename, 'size', a.size))
+            FROM compra_adjuntos a WHERE a.compra_id = compras.id) AS adjuntos`
+      : 'NULL::JSONB AS adjuntos';
+    const res = await query(`SELECT compras.*, ${adj} FROM compras ${where} ORDER BY fecha DESC, id DESC LIMIT ${limit}`, params);
     return reply.send({ items: res.rows });
   });
 

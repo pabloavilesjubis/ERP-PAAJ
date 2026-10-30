@@ -10,6 +10,7 @@ import { registerReceivedRoutes } from './received/routes.js';
 import { registerFiscalRoutes } from './fiscal/routes.js';
 import { registerImportRoutes } from './imports/routes.js';
 import { registerAssetRoutes } from './assets/routes.js';
+import { registerCompraAdjuntosRoutes } from './compra-adjuntos.routes.js';
 
 /**
  * Módulos ERP sobre la base multi-tenant: usuarios, contabilidad, CxC/CxP,
@@ -28,4 +29,5 @@ export async function registerErpModules(app: FastifyInstance): Promise<void> {
   await registerFiscalRoutes(app);
   await registerImportRoutes(app);
   await registerAssetRoutes(app);
+  await registerCompraAdjuntosRoutes(app);
 }

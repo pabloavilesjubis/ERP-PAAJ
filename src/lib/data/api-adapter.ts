@@ -31,6 +31,7 @@ interface ApiRowCompra {
   proveedor_nit: string | null; proveedor_dui: string | null; proveedor_nrc: string | null;
   descripcion: string | null; gravado: string; exento: string; iva: string; total: string;
   notas: string | null; metadata: Record<string, unknown>;
+  adjuntos?: { pdf?: { filename: string; size: number }; json?: { filename: string; size: number } } | null;
 }
 interface ApiRowContribuyente {
   id: number; nombre: string; nit: string | null; dui: string | null; nrc: string | null;
@@ -60,6 +61,10 @@ export class ApiAdapter implements DataAdapter {
   }
   private getSrvId(kind: Kind, localId: string): number | null {
     return this.serverIds.get(this.srvKey(kind, localId)) ?? null;
+  }
+  /** Id en el backend de una compra del store (para rutas como /v2/compras/:id/adjuntos). */
+  serverIdOf(kind: Kind, localId: string): number | null {
+    return this.getSrvId(kind, localId);
   }
 
   async load(): Promise<AppData> {
@@ -112,6 +117,7 @@ export class ApiAdapter implements DataAdapter {
           nit: c.proveedor_nit ?? undefined,
           dui: c.proveedor_dui ?? undefined,
         } as Compra['metadata'],
+        adjuntos: c.adjuntos ?? undefined,
       };
     });
 

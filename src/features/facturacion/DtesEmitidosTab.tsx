@@ -8,6 +8,7 @@ import { SyncDtesButton } from '@/components/dte/SyncDtesButton';
 import { displayDate, fmt, num } from '@/lib/utils/format';
 import { useDataStore } from '@/stores/data.store';
 import { annulDte, DteServiceError } from '@/lib/dte/client';
+import { downloadJsonFile, dteFromJws, dteJsonDocument } from '@/lib/dte/jws';
 import { downloadDtePdf, downloadDteTicket, extractPdfData } from '@/lib/dte/pdf';
 import type { VentaConsumidor, VentaContribuyente } from '@/types/domain';
 
@@ -150,9 +151,8 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
   }
 
   function downloadJson(dte: DteEmitido): void {
-    // El JWS guarda el DTE original en el payload (base64-url segundo segmento).
-    // Si no tenemos JWS, exportamos lo mínimo que sí tenemos.
-    let payload: unknown = {
+    // El JWS guarda el DTE original; sin él se exporta lo mínimo que sí tenemos.
+    const payload = (dte.documentoJws && dteJsonDocument(dte.documentoJws, dte.selloRecibido)) || {
       codigoGeneracion: dte.codigoGeneracion,
       numeroControl: dte.numeroControl,
       selloRecibido: dte.selloRecibido,
@@ -161,24 +161,7 @@ export function DtesEmitidosTab({ onCrearNc }: DtesEmitidosTabProps) {
       total: dte.total,
       anulado: dte.anulado,
     };
-    if (dte.documentoJws) {
-      const parts = dte.documentoJws.split('.');
-      if (parts.length === 3 && parts[1]) {
-        try {
-          const decoded = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-          payload = JSON.parse(decoded);
-        } catch {
-          // payload no decodificable — uso el resumen
-        }
-      }
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${dte.tipo.toUpperCase()}_${dte.codigoGeneracion}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJsonFile(`${dte.tipo.toUpperCase()}_${dte.codigoGeneracion}.json`, payload);
   }
 
   return (
@@ -640,25 +623,14 @@ function parseReceptorFromJws(jws?: string): {
   numDocumento: string;
   nombre: string;
 } | null {
-  if (!jws) return null;
-  const parts = jws.split('.');
-  if (parts.length !== 3 || !parts[1]) return null;
-  try {
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-    const decoded = new TextDecoder('utf-8').decode(bytes);
-    const dte = JSON.parse(decoded) as Record<string, unknown>;
-    const r = (dte.receptor as Record<string, unknown> | null | undefined)
-      ?? (dte.sujetoExcluido as Record<string, unknown> | null | undefined);
-    if (!r) return null;
-    const tipoDocumento = r.tipoDocumento as string | null | undefined;
-    const numDocumento = r.numDocumento as string | null | undefined;
-    const nombre = r.nombre as string | null | undefined;
-    if (!tipoDocumento || !numDocumento || !nombre) return null;
-    return { tipoDocumento, numDocumento, nombre };
-  } catch {
-    return null;
-  }
+  const dte = dteFromJws(jws);
+  const r = (dte?.receptor ?? dte?.sujetoExcluido) as Record<string, unknown> | null | undefined;
+  if (!r) return null;
+  const tipoDocumento = r.tipoDocumento as string | null | undefined;
+  const numDocumento = r.numDocumento as string | null | undefined;
+  const nombre = r.nombre as string | null | undefined;
+  if (!tipoDocumento || !numDocumento || !nombre) return null;
+  return { tipoDocumento, numDocumento, nombre };
 }
 
 // Export del tipo para que FacturacionPage pueda manejarlo en el flujo de NC

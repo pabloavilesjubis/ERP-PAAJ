@@ -184,6 +184,12 @@ export interface CompraMetadata {
   pdfFilename?: string;          // nombre original del archivo para mostrar
 }
 
+/** Archivos adjuntos a una compra en el backend (sin el contenido). */
+export interface CompraAdjuntos {
+  pdf?: { filename: string; size: number };
+  json?: { filename: string; size: number };
+}
+
 export interface Compra {
   id: string;
   fecha: string;
@@ -194,6 +200,8 @@ export interface Compra {
   ivaCredito: string;
   notas?: string;
   metadata?: CompraMetadata;
+  /** PDF/JSON guardados en el backend (/v2/compras/:id/adjuntos). */
+  adjuntos?: CompraAdjuntos;
 }
 
 /* ──────────────────────── Productos / catálogo POS ──────────────────────── */
