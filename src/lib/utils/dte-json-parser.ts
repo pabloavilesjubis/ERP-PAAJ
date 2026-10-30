@@ -37,6 +37,8 @@ export interface ParsedDte {
   contraparteNombre: string;
   contraparteNrc: string;
   contraparteNit?: string;
+  /** DUI de la contraparte (sujeto excluido de un FSE con documento 13). */
+  contraparteDui?: string;
   /** Base gravada sin IVA, ej. "13137.88" */
   totalGravada: string;
   totalExenta: string;
@@ -63,7 +65,7 @@ interface DteTributo {
   valor?: number | string;
 }
 
-interface DteParty { nit?: string; nrc?: string; nombre?: string }
+interface DteParty { nit?: string; nrc?: string; nombre?: string; tipoDocumento?: string; numDocumento?: string }
 
 interface DteJsonShape {
   identificacion?: {
@@ -74,6 +76,8 @@ interface DteJsonShape {
   };
   emisor?: DteParty;
   receptor?: DteParty;
+  /** FSE (14): el vendedor; el emisor es la empresa que compra. */
+  sujetoExcluido?: DteParty;
   cuerpoDocumento?: Array<{
     descripcion?: string;
     ivaItem?: number | string;
@@ -83,6 +87,7 @@ interface DteJsonShape {
     totalIva?: number | string;
     montoTotalOperacion?: number | string;
     totalPagar?: number | string;
+    totalCompra?: number | string;
     totalGravada?: number | string;
     totalExenta?: number | string;
     totalNoSuj?: number | string;
@@ -166,10 +171,12 @@ export function parseDteJson(rawText: string, perspective: DtePerspective = 'com
   const resumen = dte.resumen;
   const warnings: string[] = [];
 
-  // Selección de la contraparte según perspectiva
+  // Selección de la contraparte según perspectiva. En un FSE (14) la empresa
+  // compradora es el EMISOR: el proveedor es el sujeto excluido.
+  const esFse = String(dte.identificacion.tipoDte ?? '').padStart(2, '0') === '14';
   const contraparte: DteParty | undefined =
-    perspective === 'compra' ? dte.emisor : dte.receptor;
-  const partyLabel = perspective === 'compra' ? 'emisor' : 'receptor';
+    perspective === 'compra' ? (esFse ? dte.sujetoExcluido : dte.emisor) : dte.receptor;
+  const partyLabel = perspective === 'compra' ? (esFse ? 'sujetoExcluido' : 'emisor') : 'receptor';
   if (!contraparte) {
     return {
       ok: false,
@@ -208,11 +215,15 @@ export function parseDteJson(rawText: string, perspective: DtePerspective = 'com
 
   const contraparteNombre = String(contraparte.nombre ?? '').trim();
   const contraparteNrc = String(contraparte.nrc ?? '').trim();
-  const contraparteNit = contraparte.nit ? String(contraparte.nit) : undefined;
+  const docTipo = String(contraparte.tipoDocumento ?? '');
+  const docNum = contraparte.numDocumento ? String(contraparte.numDocumento) : undefined;
+  const contraparteNit = contraparte.nit ? String(contraparte.nit) : (docTipo === '36' ? docNum : undefined);
+  const contraparteDui = docTipo === '13' ? docNum : undefined;
 
   if (!codigoGeneracion) warnings.push('No se encontró el Código de Generación.');
   if (!contraparteNombre) warnings.push(`No se encontró el nombre del ${partyLabel}.`);
-  if (!contraparteNrc) warnings.push(`No se encontró el NRC del ${partyLabel}.`);
+  // El sujeto excluido no tiene NRC
+  if (!contraparteNrc && !esFse) warnings.push(`No se encontró el NRC del ${partyLabel}.`);
 
   const items = Array.isArray(dte.cuerpoDocumento) ? dte.cuerpoDocumento : [];
 
@@ -229,7 +240,8 @@ export function parseDteJson(rawText: string, perspective: DtePerspective = 'com
   const reteRenta = num2(resumen.reteRenta);
   const reteIva = num2(resumen.ivaRete1);
 
-  let montoTotal = num2(resumen.montoTotalOperacion ?? resumen.totalPagar);
+  // FSE: el costo es el total de la compra (totalPagar ya descuenta la renta retenida)
+  let montoTotal = num2(resumen.montoTotalOperacion ?? resumen.totalCompra ?? resumen.totalPagar);
   if (parseFloat(montoTotal) === 0) {
     const subTotal = parseFloat(totalGravada);
     if (subTotal > 0) {
@@ -254,6 +266,7 @@ export function parseDteJson(rawText: string, perspective: DtePerspective = 'com
       contraparteNombre,
       contraparteNrc,
       contraparteNit,
+      contraparteDui,
       totalGravada,
       totalExenta,
       totalNoSujeta,

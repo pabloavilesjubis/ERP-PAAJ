@@ -321,6 +321,9 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
         proveedor: d.contraparteNombre || prev.proveedor,
         nrc: d.contraparteNrc || prev.nrc,
         nit: d.contraparteNit || prev.nit,
+        dui: d.contraparteDui || prev.dui,
+        // Un FSE es siempre a persona natural (sujeto excluido)
+        tipoPersona: d.tipoDte === '14' ? 'natural' : prev.tipoPersona,
         descripcion: d.descripcion || prev.descripcion,
         monto: d.montoTotal || prev.monto,
         ivaCredito: d.totalIva || prev.ivaCredito,
