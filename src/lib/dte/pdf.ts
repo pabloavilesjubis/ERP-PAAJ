@@ -37,17 +37,25 @@ export interface PdfData {
   };
   receptor: {
     nombre: string;
+    nombreComercial?: string | null;
     nit?: string | null;
     nrc?: string | null;
     dui?: string | null;
+    /** Tipo de documento del MH (13 DUI, 36 NIT, 37 otro…) cuando viene numDocumento. */
+    tipoDocumento?: string | null;
     direccion?: string | null;
     actividad?: string | null;
+    correo?: string | null;
+    telefono?: string | null;
   } | null;
   items: Array<{
     descripcion: string;
     cantidad: number;
     precioUni: number;
     total: number;
+    /** Código de unidad de medida CAT-014 (59 = unidad). */
+    uniMedida?: number;
+    descuento?: number;
   }>;
   totales: {
     subtotal: number;
@@ -55,7 +63,16 @@ export interface PdfData {
     total: number;
     descuento?: number;
     retencionRenta?: number;
+    /** IVA retenido 1% por el cliente (gran contribuyente). */
+    retencionIva?: number;
   };
+  /** 1 contado, 2 crédito, 3 otro (CAT-016). */
+  condicionOperacion?: number;
+  /** 1 previo, 2 diferido. */
+  tipoModelo?: number;
+  /** 1 transmisión normal, 2 contingencia. */
+  tipoOperacion?: number;
+  observaciones?: string | null;
   /** Número leído de letras del total — útil para la representación gráfica. */
   totalEnLetras?: string;
 }
@@ -154,11 +171,16 @@ export function extractPdfData(args: {
     const dir = (receptorRaw.direccion as Record<string, unknown> | undefined);
     receptor = {
       nombre: String(receptorRaw.nombre ?? args.cliente),
+      nombreComercial: receptorRaw.nombreComercial as string | null | undefined,
       nit: receptorRaw.nit as string | null | undefined,
       nrc: receptorRaw.nrc as string | null | undefined,
       dui: receptorRaw.numDocumento as string | null | undefined,
-      direccion: dir ? String(dir.complemento ?? '') : null,
+      tipoDocumento: receptorRaw.tipoDocumento as string | null | undefined,
+      direccion: dir ? [dir.complemento, findMunicipio(String(dir.departamento ?? ''), String(dir.municipio ?? ''))?.nombre,
+        findDepartamento(String(dir.departamento ?? ''))?.nombre].filter(Boolean).join(', ') : null,
       actividad: receptorRaw.descActividad as string | null | undefined,
+      correo: receptorRaw.correo as string | null | undefined,
+      telefono: receptorRaw.telefono as string | null | undefined,
     };
   } else if (args.cliente && args.cliente !== 'Consumidor anónimo') {
     receptor = { nombre: args.cliente };
@@ -169,7 +191,9 @@ export function extractPdfData(args: {
       descripcion: String(it.descripcion ?? ''),
       cantidad: Number(it.cantidad ?? 1),
       precioUni: Number(it.precioUni ?? 0),
-      total: Number(it.ventaGravada ?? it.compra ?? 0),
+      total: Number(it.ventaGravada ?? it.compra ?? 0) + Number(it.ventaExenta ?? 0) + Number(it.ventaNoSuj ?? 0),
+      uniMedida: it.uniMedida !== undefined ? Number(it.uniMedida) : undefined,
+      descuento: Number(it.montoDescu ?? 0) || undefined,
     }))
     : [{ descripcion: 'Sin detalle disponible', cantidad: 1, precioUni: args.total, total: args.total }];
 
@@ -199,342 +223,323 @@ export function extractPdfData(args: {
       total: Number(resumen.totalPagar ?? resumen.montoTotalOperacion ?? args.total),
       descuento: Number(resumen.totalDescu ?? 0) || undefined,
       retencionRenta: Number(resumen.reteRenta ?? 0) || undefined,
+      retencionIva: Number(resumen.ivaRete1 ?? 0) || undefined,
     },
     totalEnLetras: resumen.totalLetras as string | undefined,
+    condicionOperacion: resumen.condicionOperacion !== undefined ? Number(resumen.condicionOperacion) : undefined,
+    tipoModelo: ident.tipoModelo !== undefined ? Number(ident.tipoModelo) : undefined,
+    tipoOperacion: ident.tipoOperacion !== undefined ? Number(ident.tipoOperacion) : undefined,
+    observaciones: (resumen.observaciones as string | null | undefined) ?? null,
   };
 }
 
 /* ───────────────────────── PDF Carta (formal) ───────────────────────── */
 
 export async function downloadDtePdf(data: PdfData, opts?: PdfOutputOpts): Promise<void> {
+  const doc = await buildDtePdf(data);
+  outputDoc(doc, `${data.tipo.toUpperCase()}_${data.numeroControl}.pdf`, opts);
+}
+
+/* Formato carta "corporativo": tipografía sobria, reglas finas en lugar de
+ * cajas de color, números alineados y toda la identificación del DTE que exige
+ * la representación gráfica (control, código, sello, modelo, transmisión, QR). */
+const INK = {
+  text:   [33, 37, 41] as const,
+  muted:  [108, 117, 125] as const,
+  faint:  [150, 157, 164] as const,
+  rule:   [206, 212, 218] as const,
+  hair:   [229, 232, 235] as const,
+  band:   [246, 247, 249] as const,
+  accent: [22, 43, 72] as const,      // azul marino, solo en el título y el total
+  danger: [176, 42, 55] as const,
+  warn:   [161, 98, 7] as const,
+};
+
+const UNIDADES: Record<number, string> = { 59: 'Unidad', 99: 'Otra', 1: 'Metro', 23: 'Litro', 36: 'Kilogramo', 34: 'Libra', 57: 'Ciento', 58: 'Docena' };
+const CONDICION: Record<number, string> = { 1: 'Contado', 2: 'A crédito', 3: 'Otro' };
+const DOC_RECEPTOR: Record<string, string> = { '13': 'DUI', '36': 'NIT', '37': 'Otro documento', '03': 'Pasaporte', '02': 'Carné de residente' };
+
+/** Logo del emisor para el PDF (lo fija BrandingProvider con el de Configuración). */
+let pdfLogo: string | null = null;
+export function setDtePdfLogo(dataUrl: string | null): void {
+  pdfLogo = dataUrl && /^data:image\/(png|jpe?g)/i.test(dataUrl) ? dataUrl : null;
+}
+
+const fmtNit = (v?: string | null) => {
+  const d = (v ?? '').replace(/\D/g, '');
+  return d.length === 14 ? `${d.slice(0, 4)}-${d.slice(4, 10)}-${d.slice(10, 13)}-${d.slice(13)}` : (v ?? '');
+};
+const fmtDui = (v?: string | null) => {
+  const d = (v ?? '').replace(/\D/g, '');
+  return d.length === 9 ? `${d.slice(0, 8)}-${d.slice(8)}` : (v ?? '');
+};
+const fmtNrc = (v?: string | null) => {
+  const d = (v ?? '').replace(/\D/g, '');
+  return d.length > 1 ? `${d.slice(0, -1)}-${d.slice(-1)}` : (v ?? '');
+};
+const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+/** Arma el PDF carta del DTE (sin descargarlo). */
+export async function buildDtePdf(data: PdfData): Promise<jsPDF> {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
-  const M = 12;
+  const M = 16;
+  const CW = W - 2 * M;
+  const color = (c: readonly [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
+  const draw = (c: readonly [number, number, number], w = 0.2) => { doc.setDrawColor(c[0], c[1], c[2]); doc.setLineWidth(w); };
+  const fill = (c: readonly [number, number, number]) => doc.setFillColor(c[0], c[1], c[2]);
+  const font = (style: 'normal' | 'bold' | 'italic', size: number, family = 'helvetica') => { doc.setFont(family, style); doc.setFontSize(size); };
+  const label = (t: string, x: number, y: number, opts?: { align?: 'left' | 'right' }) => {
+    font('bold', 6); color(INK.muted);
+    doc.text(t.toUpperCase(), x, y, opts?.align === 'right' ? opts : { charSpace: 0.25 });
+  };
+  const esFse = data.tipo === 'fse';
 
-  const fill = (rgb: readonly [number, number, number]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-  const stroke = (rgb: readonly [number, number, number]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
-  const text = (rgb: readonly [number, number, number]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-
-  /* ── Watermark ANULADO (primero, queda detrás) ── */
-  if (data.anulado) {
-    text(PALETTE.danger);
-    doc.setFontSize(110);
-    doc.setFont('helvetica', 'bold');
-    // Fake opacity con un color muy claro
-    text([245, 200, 200]);
-    doc.text('ANULADO', W / 2, H / 2 + 10, { align: 'center', angle: 30 });
+  /* ── Encabezado: emisor a la izquierda, documento a la derecha ── */
+  let y = M;
+  const leftW = CW * 0.56;
+  let lx = M;
+  if (pdfLogo) {
+    try {
+      const props = doc.getImageProperties(pdfLogo);
+      const h = 14;
+      const w = Math.min(46, (props.width / props.height) * h);
+      doc.addImage(pdfLogo, M, y, w, (props.height / props.width) * w);
+      lx = M;
+      y += Math.min(h, (props.height / props.width) * w) + 3;
+    } catch { /* logo ilegible: solo texto */ }
+  }
+  const comercial = data.emisor.nombreComercial?.trim();
+  font('bold', 12.5); color(INK.text);
+  const nombreLines = doc.splitTextToSize(comercial || data.emisor.nombre, leftW) as string[];
+  doc.text(nombreLines, lx, y + 4.5);
+  y += 4.5 + (nombreLines.length - 1) * 5;
+  if (comercial && comercial !== data.emisor.nombre) { font('normal', 8); color(INK.muted); doc.text(data.emisor.nombre, lx, y + 4); y += 4; }
+  font('normal', 7.6); color(INK.text);
+  const ubic = [findMunicipio(data.emisor.departamento ?? '', data.emisor.municipio ?? '')?.nombre, findDepartamento(data.emisor.departamento ?? '')?.nombre]
+    .filter(Boolean).join(', ');
+  const emisorLines = [
+    `NIT ${fmtNit(data.emisor.nit)}   ·   NRC ${fmtNrc(data.emisor.nrc)}`,
+    `${data.emisor.codActividad ? data.emisor.codActividad + ' · ' : ''}${data.emisor.actividad}`,
+    [data.emisor.direccion, ubic].filter(Boolean).join(', '),
+    [data.emisor.telefono && `Tel. ${data.emisor.telefono}`, data.emisor.correo].filter(Boolean).join('   ·   '),
+  ].filter(Boolean);
+  y += 5;
+  for (const l of emisorLines) {
+    const wrapped = doc.splitTextToSize(l, leftW) as string[];
+    doc.text(wrapped, lx, y);
+    y += 3.6 * wrapped.length;
   }
 
-  /* ── HEADER MINIMALISTA, CENTRADO EN LA MARCA DEL EMISOR ──
-   * Nada de bloques de color saturados ni cubos "DTE". El documento se siente
-   * como una factura real del comercio, no como un template gubernamental. */
+  // Bloque del documento (derecha)
+  const rx = W - M;
+  let ry = M + 4.5;
+  font('bold', 12); color(INK.accent);
+  for (const l of doc.splitTextToSize(TIPO_LABEL[data.tipo].toUpperCase(), CW * 0.42) as string[]) { doc.text(l, rx, ry, { align: 'right' }); ry += 5; }
+  font('normal', 7); color(INK.muted);
+  doc.text(`Documento Tributario Electrónico · ${data.tipo.toUpperCase()} ${TIPO_VERSION[data.tipo]}`, rx, ry, { align: 'right' });
+  ry += 5;
+  const badge = (txt: string, c: readonly [number, number, number]) => {
+    font('bold', 6.8);
+    const w = doc.getTextWidth(txt) + 5;
+    draw(c, 0.35); color(c);
+    doc.rect(rx - w, ry - 3.4, w, 5, 'S');
+    doc.text(txt, rx - w / 2, ry, { align: 'center' });
+    ry += 6.5;
+  };
+  if (data.anulado) badge('DOCUMENTO ANULADO', INK.danger);
+  if (data.ambiente === '00') badge('AMBIENTE DE PRUEBAS · SIN VALIDEZ TRIBUTARIA', INK.warn);
 
-  // Badge AMBIENTE PRUEBAS sólo cuando aplica (esquina superior derecha)
-  if (data.ambiente === '00') {
-    fill(PALETTE.warning);
-    doc.roundedRect(W - M - 50, M, 50, 8, 1.5, 1.5, 'F');
-    text(PALETTE.white);
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'bold');
-    doc.text('AMBIENTE PRUEBAS', W - M - 25, M + 5.3, { align: 'center' });
-  }
-
-  // Nombre comercial GRANDE centrado (la marca del emisor)
-  text(PALETTE.brand);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(24);
-  const brandName = (data.emisor.nombreComercial && data.emisor.nombreComercial.trim())
-    || data.emisor.nombre;
-  doc.text(brandName, W / 2, 22, { align: 'center' });
-
-  // Razón social pequeña debajo (si es distinta del nombre comercial)
-  if (data.emisor.nombreComercial && data.emisor.nombreComercial.trim()
-      && data.emisor.nombreComercial !== data.emisor.nombre) {
-    text(PALETTE.textMuted);
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(9);
-    doc.text(data.emisor.nombre, W / 2, 28, { align: 'center' });
-  }
-
-  // Línea separadora delgada en color brand
-  stroke(PALETTE.accent);
-  doc.setLineWidth(0.4);
-  doc.line(M, 33, W - M, 33);
-  doc.setLineWidth(0.2);
-
-  // Tipo de documento centrado
-  text(PALETTE.textDark);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text(TIPO_LABEL[data.tipo].toUpperCase(), W / 2, 40, { align: 'center' });
-
-  text(PALETTE.textMuted);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.text('Documento Tributario Electrónico', W / 2, 45, { align: 'center' });
-
-  text(PALETTE.textDark);
-  let y = 53;
-
-  /* ── EMISOR + RECEPTOR en dos columnas ── */
-  const colW = (W - 2 * M - 4) / 2;
-  const boxH = 40;
-
-  drawBoxedSection(doc, M, y, colW, boxH, 'EMISOR');
-  text(PALETTE.textDark);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text(truncate(data.emisor.nombre, 50), M + 3, y + 12);
-  if (data.emisor.nombreComercial && data.emisor.nombreComercial !== data.emisor.nombre) {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    text(PALETTE.textMuted);
-    doc.text(truncate(data.emisor.nombreComercial, 50), M + 3, y + 16);
-  }
-  text(PALETTE.textDark);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  let ey = y + 21;
-  doc.text(`NIT: ${data.emisor.nit}    NRC: ${data.emisor.nrc}`, M + 3, ey); ey += 3.5;
-  const actividadStr = `${data.emisor.codActividad ? data.emisor.codActividad + ' · ' : ''}${data.emisor.actividad}`;
-  doc.text(truncate(actividadStr, 60), M + 3, ey); ey += 3.5;
-  const ubic = [
-    findMunicipio(data.emisor.departamento ?? '', data.emisor.municipio ?? '')?.nombre,
-    findDepartamento(data.emisor.departamento ?? '')?.nombre,
-  ].filter(Boolean).join(', ');
-  doc.text(truncate(data.emisor.direccion, 60), M + 3, ey); ey += 3.5;
-  if (ubic) { doc.text(ubic, M + 3, ey); ey += 3.5; }
-  if (data.emisor.telefono) {
-    doc.text(`Tel: ${data.emisor.telefono}    ${data.emisor.correo}`, M + 3, ey);
-  } else {
-    doc.text(data.emisor.correo, M + 3, ey);
-  }
-
-  const rx = M + colW + 4;
-  drawBoxedSection(doc, rx, y, colW, boxH, 'RECEPTOR');
-  text(PALETTE.textDark);
-  if (data.receptor) {
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text(truncate(data.receptor.nombre, 50), rx + 3, y + 12);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    let ry = y + 17;
-    const ids = [
-      data.receptor.nit && `NIT: ${data.receptor.nit}`,
-      data.receptor.nrc && `NRC: ${data.receptor.nrc}`,
-      data.receptor.dui && `DUI: ${data.receptor.dui}`,
-    ].filter(Boolean).join('    ');
-    if (ids) { doc.text(ids, rx + 3, ry); ry += 3.5; }
-    if (data.receptor.actividad) { doc.text(truncate(data.receptor.actividad, 60), rx + 3, ry); ry += 3.5; }
-    if (data.receptor.direccion) doc.text(truncate(data.receptor.direccion, 60), rx + 3, ry);
-  } else {
-    text(PALETTE.textMuted);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'italic');
-    doc.text('Consumidor anónimo', rx + 3, y + 14);
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Sin datos de identificación', rx + 3, y + 19);
-  }
-
-  y += boxH + 5;
-
-  /* ── DATOS DEL DOCUMENTO ──
-   * 2 columnas para metadata corta (fecha, núm. control, tipo) y una fila
-   * full-width para el sello (es largo). Sin "Estado" — el watermark
-   * "ANULADO" ya señala el estado cuando aplica. */
-  text(PALETTE.textDark);
-  fill(PALETTE.bgLight);
-  stroke(PALETTE.border);
-  doc.roundedRect(M, y, W - 2 * M, 26, 2, 2, 'FD');
-
-  const halfW = (W - 2 * M) / 2;
-
-  // Labels
-  doc.setFontSize(6.5);
-  doc.setFont('helvetica', 'bold');
-  text(PALETTE.textMuted);
-  doc.text('FECHA Y HORA DE EMISIÓN', M + 3, y + 4);
-  doc.text('CÓDIGO DE GENERACIÓN', M + 3, y + 11);
-
-  doc.text('NÚMERO DE CONTROL', M + halfW + 3, y + 4);
-  doc.text('TIPO DE DOCUMENTO', M + halfW + 3, y + 11);
-
-  doc.text('SELLO DE RECEPCIÓN — MINISTERIO DE HACIENDA', M + 3, y + 18);
-
-  // Values
-  text(PALETTE.textDark);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  const fechaHora = `${displayDate(data.fecha)}${data.horaEmision ? '  ' + data.horaEmision : ''}`;
-  doc.text(fechaHora, M + 3, y + 7.5);
-
-  doc.setFont('courier', 'normal');
-  doc.setFontSize(7.5);
-  doc.text(data.codigoGeneracion, M + 3, y + 14.5);
-
-  doc.text(data.numeroControl, M + halfW + 3, y + 7.5);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.text(`${TIPO_LABEL[data.tipo]} · ${data.tipo.toUpperCase()} ${TIPO_VERSION[data.tipo]}`, M + halfW + 3, y + 14.5);
-
-  // Sello full-width, mono pequeño
-  doc.setFont('courier', 'normal');
-  doc.setFontSize(7);
-  doc.text(data.selloRecibido ?? '— sin sello —', M + 3, y + 22);
-
-  text(PALETTE.textDark);
-  y += 32;
-
-  /* ── DETALLE ── */
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('DETALLE', M, y);
-  y += 4;
-
-  const tableTop = y;
-
-  fill(PALETTE.brand);
-  doc.rect(M, y, W - 2 * M, 8, 'F');
-  text(PALETTE.white);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.text('#', M + 3, y + 5.5);
-  doc.text('DESCRIPCIÓN', M + 12, y + 5.5);
-  doc.text('CANT.', W - M - 62, y + 5.5);
-  doc.text('PRECIO UNIT.', W - M - 30, y + 5.5, { align: 'right' });
-  doc.text('TOTAL', W - M - 3, y + 5.5, { align: 'right' });
-  y += 8;
-
-  text(PALETTE.textDark);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-
-  data.items.forEach((item, idx) => {
-    if (y > H - 80) {
-      doc.addPage();
-      y = M;
-    }
-    if (idx % 2 === 1) {
-      fill(PALETTE.bgLight);
-      doc.rect(M, y, W - 2 * M, 6.5, 'F');
-    }
-    doc.text(String(idx + 1), M + 3, y + 4.5);
-    doc.text(truncate(item.descripcion, 65), M + 12, y + 4.5);
-    doc.text(formatQty(item.cantidad), W - M - 62, y + 4.5);
-    doc.text(`$${item.precioUni.toFixed(2)}`, W - M - 30, y + 4.5, { align: 'right' });
-    doc.setFont('helvetica', 'bold');
-    doc.text(`$${item.total.toFixed(2)}`, W - M - 3, y + 4.5, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    y += 6.5;
-  });
-
-  stroke(PALETTE.border);
-  doc.rect(M, tableTop, W - 2 * M, y - tableTop, 'S');
+  y = Math.max(y, ry) + 2;
+  draw(INK.accent, 0.6); doc.line(M, y, W - M, y);
   y += 6;
 
-  /* ── TOTALES ── */
-  const tx = W - M - 82;
-  const tw = 82;
-
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  text(PALETTE.textDark);
-
-  if (data.tipo === 'fcf') {
-    drawTotalRow(doc, tx, y, tw, 'Subtotal (sin IVA)', `$${data.totales.subtotal.toFixed(2)}`);
-    y += 5;
-    drawTotalRow(doc, tx, y, tw, 'IVA 13% (implícito)', `$${data.totales.iva.toFixed(2)}`);
-    y += 5;
-  } else if (data.tipo === 'ccf' || data.tipo === 'nc') {
-    drawTotalRow(doc, tx, y, tw, 'Subtotal', `$${data.totales.subtotal.toFixed(2)}`);
-    y += 5;
-    drawTotalRow(doc, tx, y, tw, 'IVA 13%', `$${data.totales.iva.toFixed(2)}`);
-    y += 5;
-  }
-  if (data.totales.descuento && data.totales.descuento > 0) {
-    drawTotalRow(doc, tx, y, tw, 'Descuento', `-$${data.totales.descuento.toFixed(2)}`, PALETTE.danger);
-    y += 5;
-  }
-  if (data.totales.retencionRenta && data.totales.retencionRenta > 0) {
-    drawTotalRow(doc, tx, y, tw, 'Retención Renta', `-$${data.totales.retencionRenta.toFixed(2)}`, PALETTE.danger);
-    y += 5;
-  }
-  y += 2;
-
-  fill(PALETTE.brand);
-  doc.roundedRect(tx, y, tw, 12, 2, 2, 'F');
-  text(PALETTE.white);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('TOTAL', tx + 5, y + 8);
-  doc.setFontSize(14);
-  doc.text(`$${data.totales.total.toFixed(2)}`, tx + tw - 4, y + 8, { align: 'right' });
-  y += 14;
-
-  if (data.totalEnLetras) {
-    text(PALETTE.textMuted);
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'italic');
-    doc.text(`Son: ${data.totalEnLetras}`, tx + tw - 1, y, { align: 'right', maxWidth: tw });
-    y += 4;
-  }
-
-  y += 4;
-
-  /* ── QR + VERIFICACIÓN ── */
+  /* ── Identificación del DTE + QR ── */
+  const qrSize = 27;
   const qrUrl = buildConsultaUrl(data);
-  const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 300, margin: 0 });
+  const qr = await QRCode.toDataURL(qrUrl, { width: 320, margin: 0, errorCorrectionLevel: 'M' });
+  const gridW = CW - qrSize - 8;
+  const field = (lbl: string, value: string, x: number, yy: number, w: number, mono = false) => {
+    label(lbl, x, yy);
+    font('normal', mono ? 7.4 : 8, mono ? 'courier' : 'helvetica'); color(INK.text);
+    doc.text(doc.splitTextToSize(value || '—', w - 2) as string[], x, yy + 3.8);
+  };
+  const c1 = 54, c2 = 62, c3 = gridW - c1 - c2;
+  const x2 = M + c1, x3 = M + c1 + c2;
+  field('Número de control', data.numeroControl, M, y, c1, true);
+  field('Código de generación', data.codigoGeneracion, x2, y, c2, true);
+  field('Fecha de emisión', `${displayDate(data.fecha)}${data.horaEmision ? ' · ' + data.horaEmision : ''}`, x3, y, c3);
+  field('Sello de recepción', data.selloRecibido ?? 'Pendiente', M, y + 10, c1 + c2, true);
+  field('Modelo de facturación', data.tipoModelo === 2 ? 'Diferido' : 'Previo', x3, y + 10, c3);
+  field('Tipo de transmisión', data.tipoOperacion === 2 ? 'Contingencia' : 'Normal', M, y + 20, c1);
+  field('Condición de la operación', CONDICION[data.condicionOperacion ?? 1] ?? 'Contado', x2, y + 20, c2);
+  field('Moneda', 'USD', x3, y + 20, c3);
+  doc.addImage(qr, 'PNG', W - M - qrSize, y - 2.5, qrSize, qrSize);
+  font('normal', 5.6); color(INK.faint);
+  doc.text('Verificar en el Ministerio de Hacienda', W - M - qrSize / 2, y + qrSize + 0.8, { align: 'center' });
+  y += 30;
 
-  fill(PALETTE.brandLight);
-  stroke(PALETTE.border);
-  doc.roundedRect(M, y, W - 2 * M, 36, 2, 2, 'FD');
+  /* ── Receptor / sujeto excluido ── */
+  draw(INK.rule); doc.line(M, y, W - M, y);
+  y += 5;
+  label(esFse ? 'Sujeto excluido (proveedor)' : data.tipo === 'fcf' ? 'Cliente' : 'Receptor', M, y);
+  y += 4.5;
+  if (data.receptor) {
+    const r = data.receptor;
+    font('bold', 9.5); color(INK.text);
+    doc.text(r.nombre, M, y);
+    if (r.nombreComercial && r.nombreComercial !== r.nombre) { font('normal', 7.6); color(INK.muted); doc.text(r.nombreComercial, M + doc.getTextWidth(r.nombre) * (9.5 / 7.6) + 3, y); }
+    y += 5;
+    const docLabel = r.tipoDocumento ? (DOC_RECEPTOR[r.tipoDocumento] ?? 'Documento') : (r.dui ? 'DUI' : 'Documento');
+    const docValue = r.tipoDocumento === '36' ? fmtNit(r.dui) : (!r.tipoDocumento || r.tipoDocumento === '13') ? fmtDui(r.dui) : (r.dui ?? '');
+    const cells: Array<[string, string]> = [
+      ...(r.nit ? [['NIT', fmtNit(r.nit)] as [string, string]] : []),
+      ...(r.nrc ? [['NRC', fmtNrc(r.nrc)] as [string, string]] : []),
+      ...(!r.nit && r.dui ? [[docLabel, docValue] as [string, string]] : []),
+      ...(r.actividad ? [['Actividad económica', r.actividad] as [string, string]] : []),
+      ...(r.direccion ? [['Dirección', r.direccion] as [string, string]] : []),
+      ...(r.correo ? [['Correo electrónico', r.correo] as [string, string]] : []),
+      ...(r.telefono ? [['Teléfono', r.telefono] as [string, string]] : []),
+    ];
+    // Grilla de 4 columnas; actividad y dirección ocupan dos
+    const colW = CW / 4;
+    let cx = 0;
+    let rowH = 0;
+    for (const [k, v] of cells) {
+      const span = k === 'Dirección' || k === 'Actividad económica' ? 2 : 1;
+      if (cx + span > 4) { y += rowH; cx = 0; rowH = 0; }
+      label(k, M + cx * colW, y);
+      font('normal', 7.8); color(INK.text);
+      const lines = doc.splitTextToSize(v, colW * span - 3) as string[];
+      doc.text(lines, M + cx * colW, y + 3.7);
+      rowH = Math.max(rowH, 5.5 + lines.length * 3.4);
+      cx += span;
+    }
+    y += rowH;
+  } else {
+    font('normal', 8.5); color(INK.muted);
+    doc.text('Consumidor final', M, y);
+    y += 6;
+  }
+  y += 3;
 
-  doc.addImage(qrDataUrl, 'PNG', M + 4, y + 4, 28, 28);
+  /* ── Detalle ── */
+  const cols = { n: M + 2, cant: M + 16, uni: M + 30, desc: M + 50, precio: W - M - 34, total: W - M - 2 };
+  const descW = cols.precio - cols.desc - 22;
+  const drawHead = () => {
+    fill(INK.band); draw(INK.rule);
+    doc.rect(M, y, CW, 7, 'F');
+    doc.line(M, y, W - M, y); doc.line(M, y + 7, W - M, y + 7);
+    const hy = y + 4.6;
+    label('N.º', cols.n, hy); label('Cant.', cols.cant + 9, hy, { align: 'right' }); label('Unidad', cols.uni, hy); label('Descripción', cols.desc, hy);
+    label('Precio unitario', cols.precio, hy, { align: 'right' });
+    label(data.tipo === 'ccf' || data.tipo === 'nc' ? 'Ventas gravadas' : esFse ? 'Compra' : 'Total', cols.total, hy, { align: 'right' });
+    y += 7;
+  };
+  const FOOTER_TOP = H - 24;
+  const continuation = () => {
+    font('bold', 8.5); color(INK.accent);
+    doc.text(TIPO_LABEL[data.tipo].toUpperCase(), M, y + 3);
+    font('normal', 7.5); color(INK.muted);
+    doc.text(`${data.numeroControl}   ·   continuación`, W - M, y + 3, { align: 'right' });
+    y += 7;
+  };
+  drawHead();
+  font('normal', 8); color(INK.text);
+  data.items.forEach((it, i) => {
+    font('normal', 8);
+    const lines = doc.splitTextToSize(it.descripcion, descW) as string[];
+    const lineH = 8 * 1.15 * 0.3528;   // pt → mm
+    const rowH = 6.4 + (lines.length - 1) * lineH;
+    if (y + rowH > FOOTER_TOP - 6) { doc.addPage(); y = M; continuation(); drawHead(); }
+    font('normal', 8); color(INK.text);
+    const ty = y + 4.3;
+    doc.text(String(i + 1), cols.n, ty);
+    doc.text(formatQty(it.cantidad), cols.cant + 9, ty, { align: 'right' });
+    color(INK.muted); doc.text(UNIDADES[it.uniMedida ?? 59] ?? String(it.uniMedida), cols.uni, ty); color(INK.text);
+    doc.text(lines, cols.desc, ty);
+    doc.text(money(it.precioUni), cols.precio, ty, { align: 'right' });
+    font('bold', 8); doc.text(money(it.total), cols.total, ty, { align: 'right' });
+    y += rowH;
+    draw(INK.hair); doc.line(M, y, W - M, y);
+  });
+  draw(INK.rule); doc.line(M, y, W - M, y);
+  y += 5;
 
-  text(PALETTE.brand);
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('VERIFICACIÓN OFICIAL — MINISTERIO DE HACIENDA', M + 36, y + 9);
+  /* ── Totales (derecha) y valor en letras (izquierda) ── */
+  const t = data.totales;
+  const rows: Array<[string, number, boolean?]> = [];
+  if (data.tipo === 'fcf') {
+    rows.push(['Sumas', t.subtotal + t.iva]);
+    rows.push(['IVA incluido (13%)', t.iva, true]);
+  } else if (data.tipo === 'ccf' || data.tipo === 'nc') {
+    rows.push(['Sumas', t.subtotal], ['IVA 13%', t.iva]);
+  } else {
+    rows.push(['Total de compras', t.subtotal]);
+  }
+  if (t.descuento) rows.push(['Descuentos', -t.descuento]);
+  if (t.retencionIva) rows.push(['IVA retenido (1%)', -t.retencionIva]);
+  if (t.retencionRenta) rows.push(['Renta retenida', -t.retencionRenta]);
 
-  text(PALETTE.textDark);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Escanea el QR o ingresa a:', M + 36, y + 15);
-  doc.setFont('helvetica', 'bold');
-  text([0, 80, 180]);
-  doc.text('admin.factura.gob.sv/consultaPublica', M + 36, y + 20);
+  const blockH = rows.length * 5.2 + 12;
+  if (y + blockH > FOOTER_TOP - 4) { doc.addPage(); y = M; continuation(); }
+  const tw = 78, tx = W - M - tw;
+  let ty = y;
+  for (const [k, v, informativo] of rows) {
+    font('normal', 8); color(informativo ? INK.muted : INK.text);
+    doc.text(k, tx, ty + 3.5);
+    doc.text(v < 0 ? `(${money(-v)})` : money(v), W - M - 2, ty + 3.5, { align: 'right' });
+    ty += 5.2;
+  }
+  draw(INK.accent, 0.5); doc.line(tx, ty + 0.5, W - M, ty + 0.5);
+  font('bold', 9); color(INK.accent);
+  doc.text('TOTAL A PAGAR', tx, ty + 6.2);
+  font('bold', 12);
+  doc.text(money(t.total), W - M - 2, ty + 6.4, { align: 'right' });
+  ty += 9;
+  draw(INK.accent, 0.5); doc.line(tx, ty, W - M, ty);
 
-  text(PALETTE.textMuted);
-  doc.setFontSize(6.5);
-  doc.setFont('helvetica', 'normal');
-  doc.text(truncate(qrUrl, 110), M + 36, y + 25);
-  doc.text('El cliente puede confirmar autenticidad y vigencia directamente con el MH.', M + 36, y + 30);
+  // Izquierda: valor en letras, observaciones
+  const lw = CW - tw - 10;
+  let ly = y;
+  if (data.totalEnLetras) {
+    label('Valor en letras', M, ly + 2);
+    font('normal', 8); color(INK.text);
+    const ll = doc.splitTextToSize(data.totalEnLetras, lw) as string[];
+    doc.text(ll, M, ly + 6);
+    ly += 7 + ll.length * 3.6;
+  }
+  if (data.observaciones) {
+    label('Observaciones', M, ly + 2);
+    font('normal', 7.8); color(INK.text);
+    doc.text(doc.splitTextToSize(data.observaciones, lw) as string[], M, ly + 6);
+  }
 
-  y += 40;
+  /* ── Marca de agua de anulación ── */
+  if (data.anulado) {
+    for (let p = 1; p <= doc.getNumberOfPages(); p++) {
+      doc.setPage(p);
+      doc.saveGraphicsState();
+      doc.setGState(new (doc as unknown as { GState: new (o: { opacity: number }) => unknown }).GState({ opacity: 0.1 }) as never);
+      font('bold', 84); color(INK.danger);
+      doc.text('ANULADO', W / 2, H / 2 + 20, { align: 'center', angle: 32 });
+      doc.restoreGraphicsState();
+    }
+  }
 
-  /* ── FOOTER ── */
-  stroke(PALETTE.border);
-  doc.line(M, H - 16, W - M, H - 16);
-
-  text(PALETTE.textMuted);
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'italic');
-  doc.text(
-    'Esta es una representación gráfica del Documento Tributario Electrónico (DTE).',
-    W / 2, H - 11, { align: 'center' },
-  );
-  doc.setFont('helvetica', 'normal');
-  doc.text(
-    `Generado: ${new Date().toLocaleString('es-SV')} · Conserve este documento.`,
-    W / 2, H - 7, { align: 'center' },
-  );
-
-  const filename = `${data.tipo.toUpperCase()}_${data.numeroControl}.pdf`;
-  outputDoc(doc, filename, opts);
+  /* ── Pie en todas las páginas ── */
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    draw(INK.rule); doc.line(M, H - 18, W - M, H - 18);
+    font('normal', 6.6); color(INK.muted);
+    doc.text('Representación gráfica de un Documento Tributario Electrónico. Verifique su validez escaneando el código QR', M, H - 13.5);
+    doc.text(`o en admin.factura.gob.sv/consultaPublica con el código de generación ${data.codigoGeneracion}.`, M, H - 10.5);
+    doc.text(`Página ${p} de ${pages}`, W - M, H - 13.5, { align: 'right' });
+    doc.text(data.numeroControl, W - M, H - 10.5, { align: 'right' });
+  }
+  return doc;
 }
 
 /* ───────────────────────── Ticket 80mm (térmico) ───────────────────────── */
@@ -782,32 +787,7 @@ function outputDoc(doc: jsPDF, filename: string, opts?: PdfOutputOpts): void {
 
 /* ───────────────────────── Helpers ───────────────────────── */
 
-function drawBoxedSection(
-  doc: jsPDF, x: number, y: number, w: number, h: number, title: string,
-) {
-  doc.setFillColor(PALETTE.bgLight[0], PALETTE.bgLight[1], PALETTE.bgLight[2]);
-  doc.setDrawColor(PALETTE.border[0], PALETTE.border[1], PALETTE.border[2]);
-  doc.roundedRect(x, y, w, h, 2, 2, 'FD');
-  doc.setFillColor(PALETTE.brand[0], PALETTE.brand[1], PALETTE.brand[2]);
-  doc.rect(x, y, w, 6, 'F');
-  doc.setTextColor(PALETTE.white[0], PALETTE.white[1], PALETTE.white[2]);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.text(title, x + 3, y + 4.3);
-}
 
-function drawTotalRow(
-  doc: jsPDF, x: number, y: number, w: number, label: string, value: string,
-  valueColor?: readonly [number, number, number],
-) {
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(PALETTE.textDark[0], PALETTE.textDark[1], PALETTE.textDark[2]);
-  doc.text(label, x + 4, y);
-  if (valueColor) doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-  doc.text(value, x + w - 4, y, { align: 'right' });
-  doc.setTextColor(PALETTE.textDark[0], PALETTE.textDark[1], PALETTE.textDark[2]);
-}
 
 function drawTicketLine(
   doc: jsPDF, x1: number, y: number, x2: number, label: string, value: string,

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { setDtePdfLogo } from '@/lib/dte/pdf';
 import { useAuth } from '@/auth/useAuth';
 import { api } from '@/lib/api/client';
 
@@ -78,6 +79,9 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     // branding del tenant (ese va en el sidebar).
     document.title = 'PIPELINE ERP';
   }, [branding.colorPrimary, branding.colorAccent]);
+
+  // El logo de Configuración también encabeza los PDF de los DTE
+  useEffect(() => { setDtePdfLogo(branding.logoUrl); }, [branding.logoUrl]);
 
   const value = useMemo(() => ({
     branding,
