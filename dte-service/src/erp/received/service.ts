@@ -102,6 +102,14 @@ export async function runMailbox(c: Ctx, opts: { since?: string | null; trigger:
   const sum: RunSummary = { scanned: 0, imported: 0, duplicates: 0, rejected: 0, errors: 0, pending: 0, status: 'done', detail: null };
   const box = (await q<MailboxRow>('SELECT * FROM accounting.mailboxes WHERE tenant_id = $1', [c.tenantId])).rows[0];
   if (!box) throw new Error('El buzón no está configurado');
+  // Sin datos fiscales no se puede validar que un DTE sea para la empresa: no se
+  // lee nada (los correos quedan pendientes para cuando se completen).
+  const emisor = await q('SELECT 1 FROM public.tenant_emisor WHERE tenant_id = $1', [c.tenantId]);
+  if (!emisor.rows.length) {
+    const detail = 'Completa los datos fiscales de la empresa en Mi empresa (NIT y NRC) para leer el buzón';
+    await q(`UPDATE accounting.mailboxes SET last_run_at = NOW(), last_status = 'error', last_detail = $2 WHERE tenant_id = $1`, [c.tenantId, detail]);
+    return { ...sum, status: 'error', detail };
+  }
   const password = decryptSecret(box.password_enc);
   const secrets = [password, box.username];
   const started = Date.now();

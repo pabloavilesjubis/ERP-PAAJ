@@ -53,6 +53,23 @@ describe.skipIf(!hasDb)('posición fiscal, DTEs recibidos, importaciones y activ
     expect(parties.json().items[0].balance).toBe(228);
   });
 
+  it('DTEs recibidos: rechaza las ventas propias y no registra nada sin datos fiscales', async () => {
+    // Copia de una venta de la propia empresa (emisor = su NIT): no es una compra
+    const propia = supplierDte('DDDDDDDD-1111-2222-3333-444444444444', {
+      emisor: { nit: '06140101261001', nrc: '1234567', nombre: 'EMPRESA DE PRUEBA' },
+      receptor: { nit: '06141111111111', nrc: '2222', nombre: 'CLIENTE' } });
+    const r1 = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files: [{ name: 'propia.json', content: propia }] } });
+    expect(r1.json().results[0]).toMatchObject({ status: 'rechazado', detail: expect.stringMatching(/misma empresa/) });
+    // Empresa sin datos fiscales: imposible saber si el DTE es suyo
+    const sinDatos = await createTenant();
+    await setupAccounting(app, sinDatos);
+    const r2 = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(sinDatos.token), payload: { files: [
+      { name: 'x.json', content: supplierDte('EEEEEEEE-1111-2222-3333-444444444444') }] } });
+    expect(r2.json().results[0]).toMatchObject({ status: 'rechazado', detail: expect.stringMatching(/datos fiscales/) });
+    const { query } = await db();
+    expect((await query('SELECT count(*)::int n FROM compras WHERE tenant_id = $1', [sinDatos.tenantId])).rows[0]!.n).toBe(0);
+  });
+
   it('importación: valida la ley y contabiliza solo lo pagado en aduana', async () => {
     const before = await balances(app, t);
     const bad = await app.inject({ method: 'POST', url: '/v2/imports', headers: auth(t.token), payload: {
