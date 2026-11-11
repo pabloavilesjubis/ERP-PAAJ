@@ -78,7 +78,7 @@ export function listAttachments(node: MessageStructureObject | undefined): Attac
   return out;
 }
 
-export interface MailboxRow { tenant_id: number; host: string; port: number; username: string; password_enc: string; folder: string }
+export interface MailboxRow { id: number; tenant_id: number; host: string; port: number; username: string; password_enc: string; folder: string }
 
 export function imapClient(m: { host: string; port: number; username: string; password: string }): ImapFlow {
   return new ImapFlow({
@@ -99,16 +99,22 @@ export function safeError(e: unknown, secrets: string[]): string {
 
 export interface RunSummary { scanned: number; imported: number; duplicates: number; rejected: number; errors: number; pending: number; status: 'done' | 'partial' | 'error'; detail: string | null }
 
-export async function runMailbox(c: Ctx, opts: { since?: string | null; trigger: 'auto' | 'manual' }): Promise<RunSummary> {
+/**
+ * Revisa una cuenta de correo. Sin rango: los últimos LOOKBACK_DAYS días. Con
+ * `since`/`until` (YYYY-MM-DD, ambos inclusive) revisa los correos recibidos en
+ * ese período, p. ej. meses completos. Corta a los BUDGET_MS y devuelve
+ * `partial` con lo pendiente: repetir la misma llamada continúa donde quedó.
+ */
+export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: string | null; until?: string | null; trigger: 'auto' | 'manual' }): Promise<RunSummary> {
   const sum: RunSummary = { scanned: 0, imported: 0, duplicates: 0, rejected: 0, errors: 0, pending: 0, status: 'done', detail: null };
-  const box = (await q<MailboxRow>('SELECT * FROM accounting.mailboxes WHERE tenant_id = $1', [c.tenantId])).rows[0];
-  if (!box) throw new Error('El buzón no está configurado');
+  const box = (await q<MailboxRow>('SELECT * FROM accounting.mailboxes WHERE id = $1 AND tenant_id = $2', [mailboxId, c.tenantId])).rows[0];
+  if (!box) throw new Error('La cuenta de correo no existe');
   // Sin datos fiscales no se puede validar que un DTE sea para la empresa: no se
   // lee nada (los correos quedan pendientes para cuando se completen).
   const emisor = await q('SELECT 1 FROM public.tenant_emisor WHERE tenant_id = $1', [c.tenantId]);
   if (!emisor.rows.length) {
     const detail = 'Completa los datos fiscales de la empresa en Mi empresa (NIT y NRC) para leer el buzón';
-    await q(`UPDATE accounting.mailboxes SET last_run_at = NOW(), last_status = 'error', last_detail = $2 WHERE tenant_id = $1`, [c.tenantId, detail]);
+    await q(`UPDATE accounting.mailboxes SET last_run_at = NOW(), last_status = 'error', last_detail = $2 WHERE id = $1`, [box.id, detail]);
     return { ...sum, status: 'error', detail };
   }
   const password = decryptSecret(box.password_enc);
@@ -123,11 +129,13 @@ export async function runMailbox(c: Ctx, opts: { since?: string | null; trigger:
       const mb = client.mailbox;
       if (!mb || !mb.readOnly) throw new Error('El buzón no se abrió en modo de solo lectura');
       const uidValidity = String(mb.uidValidity);
-      const found = await client.search({ since: new Date(`${since}T00:00:00-06:00`) }, { uid: true });
+      // IMAP filtra por fecha de recepción del correo; BEFORE es exclusivo: día siguiente a `until`
+      const before = opts.until ? new Date(new Date(`${opts.until}T00:00:00-06:00`).getTime() + 86_400_000) : undefined;
+      const found = await client.search({ since: new Date(`${since}T00:00:00-06:00`), ...(before ? { before } : {}) }, { uid: true });
       const uids = (Array.isArray(found) ? found : []).sort((a, b) => a - b);
       const known = new Map((await q<{ uid: number; status: string; attempts: number }>(
-        'SELECT uid, status, attempts FROM accounting.mail_messages WHERE tenant_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = ANY($4::bigint[])',
-        [c.tenantId, box.folder, uidValidity, uids])).rows.map(k => [Number(k.uid), k]));
+        'SELECT uid, status, attempts FROM accounting.mail_messages WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = ANY($4::bigint[])',
+        [box.id, box.folder, uidValidity, uids])).rows.map(k => [Number(k.uid), k]));
       const todo = uids.filter(uid => {
         const k = known.get(uid);
         if (!k) return true;
@@ -140,13 +148,13 @@ export async function runMailbox(c: Ctx, opts: { since?: string | null; trigger:
         let msg: Awaited<ReturnType<ImapFlow['fetchOne']>> | undefined;
         try {
           msg = await client.fetchOne(String(uid), { uid: true, envelope: true, bodyStructure: true, internalDate: true }, { uid: true });
-        } catch (e) { sum.errors++; await saveMessage(c, box.folder, uidValidity, uid, 'error', 0, null, safeError(e, secrets)); continue; }
+        } catch (e) { sum.errors++; await saveMessage(c, box.id, box.folder, uidValidity, uid, 'error', 0, null, safeError(e, secrets)); continue; }
         if (!msg) continue;
         sum.scanned++;
         const from = msg.envelope?.from?.[0];
         const header = { mail_from: from ? (from.name ? `${from.name} <${from.address ?? ''}>` : from.address ?? null) : null, mail_subject: msg.envelope?.subject ?? null };
         const jsons = listAttachments(msg.bodyStructure).filter(a => a.kind === 'json');
-        if (!jsons.length) { await saveMessage(c, box.folder, uidValidity, uid, 'sin_dte', 0, header, null); continue; }
+        if (!jsons.length) { await saveMessage(c, box.id, box.folder, uidValidity, uid, 'sin_dte', 0, header, null); continue; }
         const notes: string[] = [];
         let failed = false;
         let count = 0;
@@ -174,43 +182,43 @@ export async function runMailbox(c: Ctx, opts: { since?: string | null; trigger:
             notes.push(`${j.filename}: ${safeError(e, secrets)}`);
           }
         }
-        await saveMessage(c, box.folder, uidValidity, uid, failed ? 'error' : 'procesado', count, header, notes.join(' · ').slice(0, 1000));
+        await saveMessage(c, box.id, box.folder, uidValidity, uid, failed ? 'error' : 'procesado', count, header, notes.join(' · ').slice(0, 1000));
       }
     } finally {
       lock.release();
     }
-    if (sum.pending) { sum.status = 'partial'; sum.detail = `Quedan ${sum.pending} correos para la próxima revisión`; }
+    if (sum.pending) { sum.status = 'partial'; sum.detail = `Quedan ${sum.pending} correos por revisar`; }
   } catch (e) {
     sum.status = 'error';
     sum.detail = safeError(e, secrets);
   } finally {
     await client.logout().catch(() => client.close());
   }
-  await q(`UPDATE accounting.mailboxes SET last_run_at = NOW(), last_status = $2, last_detail = $3 WHERE tenant_id = $1`,
-    [c.tenantId, sum.status, sum.detail ?? `${sum.imported} registrados, ${sum.duplicates} duplicados, ${sum.rejected} rechazados de ${sum.scanned} correos`]);
+  await q(`UPDATE accounting.mailboxes SET last_run_at = NOW(), last_status = $2, last_detail = $3 WHERE id = $1`,
+    [box.id, sum.status, sum.detail ?? `${sum.imported} registrados, ${sum.duplicates} duplicados, ${sum.rejected} rechazados de ${sum.scanned} correos`]);
   return sum;
 }
 
-async function saveMessage(c: Ctx, folder: string, uidValidity: string, uid: number, status: string, count: number,
+async function saveMessage(c: Ctx, mailboxId: number, folder: string, uidValidity: string, uid: number, status: string, count: number,
   header: { mail_from: string | null; mail_subject: string | null } | null, detail: string | null, db?: pg.PoolClient): Promise<void> {
-  await q(`INSERT INTO accounting.mail_messages (tenant_id, folder, uid_validity, uid, status, dte_count, mail_from, subject, detail)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           ON CONFLICT (tenant_id, folder, uid_validity, uid) DO UPDATE SET status = $5, dte_count = $6,
-             attempts = accounting.mail_messages.attempts + 1, detail = $9, updated_at = NOW()`,
-    [c.tenantId, folder, uidValidity, uid, status, count, header?.mail_from ?? null, header?.mail_subject ?? null, detail], db);
+  await q(`INSERT INTO accounting.mail_messages (tenant_id, mailbox_id, folder, uid_validity, uid, status, dte_count, mail_from, subject, detail)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (mailbox_id, folder, uid_validity, uid) DO UPDATE SET status = $6, dte_count = $7,
+             attempts = accounting.mail_messages.attempts + 1, detail = $10, updated_at = NOW()`,
+    [c.tenantId, mailboxId, folder, uidValidity, uid, status, count, header?.mail_from ?? null, header?.mail_subject ?? null, detail], db);
 }
 
-/** Revisa los buzones habilitados de todas las empresas cada 30 minutos. */
+/** Revisa las cuentas de correo habilitadas de todas las empresas cada 30 minutos. */
 export function startMailboxScheduler(log: { info: (o: unknown, m?: string) => void; error: (o: unknown, m?: string) => void }): NodeJS.Timeout {
   const tick = async () => {
     try {
-      const boxes = await q<{ tenant_id: number }>(`
-        SELECT m.tenant_id FROM accounting.mailboxes m JOIN public.tenants t ON t.id = m.tenant_id
-         WHERE m.enabled AND t.status = 'active'`);
+      const boxes = await q<{ id: number; tenant_id: number }>(`
+        SELECT m.id, m.tenant_id FROM accounting.mailboxes m JOIN public.tenants t ON t.id = m.tenant_id
+         WHERE m.enabled AND t.status = 'active' ORDER BY m.tenant_id, m.id`);
       for (const b of boxes.rows) {
-        const res = await runMailbox({ tenantId: b.tenant_id, userId: 'sistema', userName: 'Buzón DTE' }, { trigger: 'auto' })
+        const res = await runMailbox({ tenantId: b.tenant_id, userId: 'sistema', userName: 'Buzón DTE' }, b.id, { trigger: 'auto' })
           .catch(e => ({ status: 'error', detail: String(e) }));
-        log.info({ tenant: b.tenant_id, res }, 'buzón DTE revisado');
+        log.info({ tenant: b.tenant_id, mailbox: b.id, res }, 'buzón DTE revisado');
       }
     } catch (e) {
       // Base sin la migración 012 aún: el programador espera a la siguiente vuelta

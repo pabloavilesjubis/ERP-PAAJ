@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requirePerm } from '../../auth/auth.middleware.js';
-import { encryptSecret } from '../../auth/crypto.js';
+import { decryptSecret, encryptSecret } from '../../auth/crypto.js';
 import { ValidationError } from '../../errors.js';
 import { authedPlugin, ctx, idParam, intParam, parse, q } from '../http.js';
 import { imapClient, ingestText, runMailbox, safeError } from './service.js';
@@ -12,6 +12,7 @@ import { imapClient, ingestText, runMailbox, safeError } from './service.js';
  */
 
 const MailboxBody = z.object({
+  label: z.string().trim().max(60).nullable().optional().transform(v => v || null),
   host: z.string().trim().min(3, 'Indica el servidor IMAP'),
   port: z.number().int().min(1).max(65535).default(993),
   username: z.string().trim().min(3, 'Indica el usuario'),
@@ -60,30 +61,65 @@ export async function registerReceivedRoutes(app: FastifyInstance): Promise<void
       return res.rows[0];
     });
 
-    // ── Buzón IMAP de la empresa ─────────────────────────────────────────────
-    r.get('/v2/received-mailbox', { preHandler: requirePerm('accounting:view') }, async (req) => {
+    // ── Cuentas de correo (IMAP) de la empresa: pueden ser varias ───────────
+    const COLS = 'id, label, host, port, username, folder, enabled, last_run_at, last_status, last_detail';
+    const boxId = (req: { params: unknown }) => {
+      const id = Number((req.params as { id: string }).id);
+      if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Cuenta inválida');
+      return id;
+    };
+    const assertUnique = async (tenantId: number, b: z.infer<typeof MailboxBody>, exceptId: number | null) => {
+      const dup = await q(`SELECT 1 FROM accounting.mailboxes WHERE tenant_id = $1 AND lower(host) = lower($2) AND lower(username) = lower($3)
+                             AND folder = $4 AND id IS DISTINCT FROM $5`, [tenantId, b.host, b.username, b.folder, exceptId]);
+      if (dup.rows.length) throw new ValidationError(`La cuenta ${b.username} (${b.folder}) ya está agregada`);
+    };
+
+    r.get('/v2/received-mailboxes', { preHandler: requirePerm('accounting:view') }, async (req) => {
       const { tenantId } = ctx(req);
-      const res = await q(`SELECT host, port, username, folder, enabled, last_run_at, last_status, last_detail
-                             FROM accounting.mailboxes WHERE tenant_id = $1`, [tenantId]);
-      return { mailbox: res.rows[0] ?? null };
+      return { items: (await q(`SELECT ${COLS} FROM accounting.mailboxes WHERE tenant_id = $1 ORDER BY id`, [tenantId])).rows };
     });
 
-    r.put('/v2/received-mailbox', { preHandler: requirePerm('accounting:config') }, async (req) => {
+    r.post('/v2/received-mailboxes', { preHandler: requirePerm('accounting:config') }, async (req) => {
       const { tenantId } = ctx(req);
+      const b = parse(MailboxBody.extend({ password: z.string({ required_error: 'Indica la contraseña del correo' }).min(1, 'Indica la contraseña del correo') }), req.body);
+      await assertUnique(tenantId, b, null);
+      const res = await q<{ id: number }>(`INSERT INTO accounting.mailboxes (tenant_id, label, host, port, username, password_enc, folder, enabled)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [tenantId, b.label, b.host, b.port, b.username, encryptSecret(b.password), b.folder, b.enabled]);
+      return { id: res.rows[0]!.id };
+    });
+
+    r.put('/v2/received-mailboxes/:id', { preHandler: requirePerm('accounting:config') }, async (req) => {
+      const { tenantId } = ctx(req);
+      const id = boxId(req);
       const b = parse(MailboxBody, req.body);
-      const existing = await q<{ password_enc: string }>('SELECT password_enc FROM accounting.mailboxes WHERE tenant_id = $1', [tenantId]);
-      const enc = b.password ? encryptSecret(b.password) : existing.rows[0]?.password_enc;
-      if (!enc) throw new ValidationError('Indica la contraseña del buzón');
-      await q(`INSERT INTO accounting.mailboxes (tenant_id, host, port, username, password_enc, folder, enabled)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
-               ON CONFLICT (tenant_id) DO UPDATE SET host = $2, port = $3, username = $4, password_enc = $5, folder = $6, enabled = $7, updated_at = NOW()`,
-        [tenantId, b.host, b.port, b.username, enc, b.folder, b.enabled]);
+      await assertUnique(tenantId, b, id);
+      // Contraseña vacía = conservar la actual
+      const res = await q(`UPDATE accounting.mailboxes SET label = $3, host = $4, port = $5, username = $6,
+                             password_enc = COALESCE($7, password_enc), folder = $8, enabled = $9, updated_at = NOW()
+                            WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId, b.label, b.host, b.port, b.username, b.password ? encryptSecret(b.password) : null, b.folder, b.enabled]);
+      if (!res.rowCount) throw new ValidationError('La cuenta de correo no existe');
       return { success: true };
     });
 
-    r.post('/v2/received-mailbox/test', { preHandler: requirePerm('accounting:config') }, async (req) => {
-      const b = parse(MailboxBody.extend({ password: z.string().min(1, 'Indica la contraseña para probar') }), req.body);
-      const client = imapClient({ host: b.host, port: b.port, username: b.username, password: b.password });
+    r.delete('/v2/received-mailboxes/:id', { preHandler: requirePerm('accounting:config') }, async (req) => {
+      const { tenantId } = ctx(req);
+      await q('DELETE FROM accounting.mailboxes WHERE id = $1 AND tenant_id = $2', [boxId(req), tenantId]);
+      return { success: true };
+    });
+
+    // Prueba la conexión. Al editar una cuenta existente sin escribir la contraseña, usa la guardada.
+    r.post('/v2/received-mailboxes/test', { preHandler: requirePerm('accounting:config') }, async (req) => {
+      const { tenantId } = ctx(req);
+      const b = parse(MailboxBody.extend({ id: z.number().int().positive().optional() }), req.body);
+      let password = b.password;
+      if (!password && b.id) {
+        const row = (await q<{ password_enc: string }>('SELECT password_enc FROM accounting.mailboxes WHERE id = $1 AND tenant_id = $2', [b.id, tenantId])).rows[0];
+        if (row) password = decryptSecret(row.password_enc);
+      }
+      if (!password) throw new ValidationError('Indica la contraseña para probar');
+      const client = imapClient({ host: b.host, port: b.port, username: b.username, password });
       try {
         await client.connect();
         const lock = await client.getMailboxLock(b.folder, { readOnly: true });
@@ -91,16 +127,25 @@ export async function registerReceivedRoutes(app: FastifyInstance): Promise<void
         lock.release();
         return { ok: true, messages: exists };
       } catch (e) {
-        return { ok: false, error: safeError(e, [b.password, b.username]) };
+        return { ok: false, error: safeError(e, [password, b.username]) };
       } finally {
         await client.logout().catch(() => client.close());
       }
     });
 
-    r.post('/v2/received-mailbox/run', { preHandler: requirePerm('accounting:post') }, async (req) => {
+    // Revisar ahora: sin meses, los últimos 30 días; con { from, to } (YYYY-MM) los meses completos
+    r.post('/v2/received-mailboxes/:id/run', { preHandler: requirePerm('accounting:post') }, async (req) => {
       const c = ctx(req);
-      const b = parse(z.object({ since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() }), req.body);
-      return runMailbox(c, { since: b.since ?? null, trigger: 'manual' });
+      const b = parse(z.object({
+        from: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mes inicial inválido').nullable().optional(),
+        to: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mes final inválido').nullable().optional(),
+      }), req.body);
+      if (!b.from) return runMailbox(c, boxId(req), { trigger: 'manual' });
+      const to = b.to ?? b.from;
+      if (to < b.from) throw new ValidationError('El mes final no puede ser anterior al inicial');
+      const [ty, tm] = to.split('-').map(Number) as [number, number];
+      const lastDay = new Date(Date.UTC(ty, tm, 0)).getUTCDate();
+      return runMailbox(c, boxId(req), { since: `${b.from}-01`, until: `${to}-${String(lastDay).padStart(2, '0')}`, trigger: 'manual' });
     });
   });
 }
