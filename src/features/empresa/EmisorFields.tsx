@@ -13,6 +13,7 @@ export const EMPTY_EMISOR: Emisor = {
   mh_env: 'production', mh_nit: '', emisor_nrc: '', emisor_nombre: '', emisor_cod_actividad: '', emisor_desc_actividad: '',
   emisor_tipo_establecimiento: '02', emisor_departamento: '', emisor_municipio: '', emisor_complemento: '', emisor_telefono: null,
   emisor_email: '', punto_venta_establecimiento: 'M001', punto_venta_punto: 'P001', emisor_cod_estable_mh: null, emisor_cod_punto_venta_mh: null,
+  emisor_dui: null,
   mh_password: '', firmador_password: '',
 };
 
@@ -20,7 +21,7 @@ export const EMPTY_EMISOR: Emisor = {
 export function cleanEmisor(e: Emisor): Emisor {
   const out = { ...e } as Record<string, unknown>;
   for (const [k, v] of Object.entries(out)) if (typeof v === 'string') out[k] = v.trim();
-  for (const k of ['emisor_telefono', 'emisor_cod_estable_mh', 'emisor_cod_punto_venta_mh']) if (!out[k]) out[k] = null;
+  for (const k of ['emisor_telefono', 'emisor_cod_estable_mh', 'emisor_cod_punto_venta_mh', 'emisor_dui']) if (!out[k]) out[k] = null;
   if (!out.mh_password) delete out.mh_password;
   if (!out.firmador_password) delete out.firmador_password;
   return out as unknown as Emisor;
@@ -52,6 +53,7 @@ export function EmisorFields({ e, setE, requirePasswords, showPasswords = true }
         <Input {...f('mh_nit')} placeholder="0614-010101-101-1" />
       </Field>
       <Field label="NRC"><Input {...f('emisor_nrc')} placeholder="123456-7" /></Field>
+      <Field label="DUI del titular (persona natural)"><Input {...f('emisor_dui')} placeholder="01234567-8" /></Field>
       <ActividadField codigo={e.emisor_cod_actividad} descripcion={e.emisor_desc_actividad}
         onChange={(cod, desc) => setE({ ...e, emisor_cod_actividad: cod, emisor_desc_actividad: desc })} />
       <Field label="Tipo de establecimiento">

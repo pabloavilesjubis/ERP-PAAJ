@@ -16,7 +16,7 @@ export const FIRMADOR_CERTS_DIR = process.env.FIRMADOR_CERTS_DIR ?? '/app/certs'
 
 export const EMISOR_COLS = ['mh_env', 'mh_nit', 'emisor_nrc', 'emisor_nombre', 'emisor_cod_actividad', 'emisor_desc_actividad',
   'emisor_tipo_establecimiento', 'emisor_departamento', 'emisor_municipio', 'emisor_complemento', 'emisor_telefono', 'emisor_email',
-  'punto_venta_establecimiento', 'punto_venta_punto', 'emisor_cod_estable_mh', 'emisor_cod_punto_venta_mh'] as const;
+  'punto_venta_establecimiento', 'punto_venta_punto', 'emisor_cod_estable_mh', 'emisor_cod_punto_venta_mh', 'emisor_dui'] as const;
 
 const code4 = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{4}$/, '4 caracteres (letras o números)');
 
@@ -38,6 +38,9 @@ export const EmisorInput = z.object({
   punto_venta_punto: code4,
   emisor_cod_estable_mh: code4.nullable().optional().or(z.literal('').transform(() => null)),
   emisor_cod_punto_venta_mh: code4.nullable().optional().or(z.literal('').transform(() => null)),
+  // Persona natural: DUI del titular, para reconocerla como receptor de DTEs (migración 017)
+  emisor_dui: z.string().trim().nullable().optional().transform(v => (v ?? '').replace(/\D/g, '') || null)
+    .refine(v => v === null || /^\d{9}$/.test(v), 'El DUI debe tener 9 dígitos'),
   mh_password: z.string().optional(),
   firmador_password: z.string().optional(),
 });

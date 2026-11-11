@@ -170,6 +170,8 @@ export interface CompraMetadata {
    * con tope de $30 (sobre techo cotizable de $1000).
    */
   isssRetenido?: string;
+  /** Compra sin crédito fiscal (factura de consumidor final): IVA pagado que forma parte del costo. */
+  ivaNoDeducible?: string;
   /** 'pos' = FSE emitido desde el POS (CIPA compra al sujeto excluido). */
   source?: 'manual' | 'imported' | 'pos';
   /** JWS del FSE emitido — preserva el JSON original (PDF/JSON en DTEs emitidos). */

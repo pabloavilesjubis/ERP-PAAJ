@@ -73,11 +73,13 @@ export function buildAnexoCompras(opts: AnexoComprasOptions): AnexoComprasResult
     .sort((a, b) => b.fecha.localeCompare(a.fecha));
 
   // Filtra solo las que tienen metadata fiscal mínima (clase, tipo, número doc).
+  // Las compras sin crédito fiscal (factura de consumidor final) no van al anexo de IVA.
   const exportable = eligibles.filter(c => {
     const m = c.metadata;
-    return !!m?.claseDocumento && !!m?.tipoDocumento && !!m?.numeroDocumento;
+    return !!m?.claseDocumento && !!m?.tipoDocumento && !!m?.numeroDocumento && !m?.ivaNoDeducible && m?.tipoDocumento !== '01';
   });
-  const excludedNoMetadata = eligibles.length - exportable.length;
+  const sinCredito = eligibles.filter(c => c.metadata?.ivaNoDeducible || c.metadata?.tipoDocumento === '01').length;
+  const excludedNoMetadata = eligibles.length - exportable.length - sinCredito;
 
   const lines = exportable.map(c => {
     const m = c.metadata!;

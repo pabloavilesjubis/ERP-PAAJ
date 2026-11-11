@@ -10,6 +10,8 @@ export interface Emisor {
   emisor_desc_actividad: string; emisor_tipo_establecimiento: string; emisor_departamento: string; emisor_municipio: string;
   emisor_complemento: string; emisor_telefono: string | null; emisor_email: string; punto_venta_establecimiento: string;
   punto_venta_punto: string; emisor_cod_estable_mh: string | null; emisor_cod_punto_venta_mh: string | null;
+  /** DUI del titular (persona natural). */
+  emisor_dui?: string | null;
   mh_password?: string; firmador_password?: string;
 }
 export interface TenantUser { id: string; email: string; full_name: string | null; role: string; active: boolean; created_at: string; last_login_at: string | null }

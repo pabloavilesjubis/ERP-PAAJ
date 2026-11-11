@@ -25,7 +25,8 @@ export function docForSql(d: ParsedDte): Record<string, unknown> {
   return {
     generation_code: d.generationCode, control_number: d.controlNumber || null, reception_stamp: d.receptionStamp,
     document_type: d.documentType, issue_date: d.issueDate || null, description: d.description || null,
-    receiver_nit: d.receiver?.nit || null, receiver_nrc: d.receiver?.nrc || null, receiver_name: d.receiver?.name || null,
+    receiver_nit: d.receiver?.nit || null, receiver_nrc: d.receiver?.nrc || null, receiver_dui: d.receiver?.dui || null,
+    receiver_name: d.receiver?.name || null,
     issuer_nit: d.issuer.nit || null, issuer_nrc: d.issuer.nrc || null, issuer_name: d.issuer.name || null, issuer: d.issuer,
     taxable_amount: d.taxableAmount, exempt_amount: d.exemptAmount, non_subject_amount: d.nonSubjectAmount,
     iva_amount: d.ivaAmount, other_taxes: d.otherTaxes, iva_perceived: d.ivaPerceived, iva_withheld: d.ivaWithheld,

@@ -155,7 +155,7 @@ function ReadOnlyFiscal({ c }: { c: Company }) {
   if (!c.emisor) return <div className="banner banner-warning">La empresa aún no tiene datos fiscales. Los carga el administrador.</div>;
   const e = c.emisor;
   const rows: Array<[string, string | null]> = [
-    ['Nombre', e.emisor_nombre], ['NIT', e.mh_nit], ['NRC', e.emisor_nrc], ['Actividad', `${e.emisor_cod_actividad} · ${e.emisor_desc_actividad}`],
+    ['Nombre', e.emisor_nombre], ['NIT', e.mh_nit], ['NRC', e.emisor_nrc], ['DUI del titular', e.emisor_dui ?? null], ['Actividad', `${e.emisor_cod_actividad} · ${e.emisor_desc_actividad}`],
     ['Dirección', `${e.emisor_complemento} (depto. ${e.emisor_departamento}, municipio ${e.emisor_municipio})`],
     ['Teléfono', e.emisor_telefono], ['Email', e.emisor_email], ['Ambiente MH', e.mh_env === 'production' ? 'Producción' : 'Pruebas'],
     ['Establecimiento / punto de venta', `${e.punto_venta_establecimiento} / ${e.punto_venta_punto}`],

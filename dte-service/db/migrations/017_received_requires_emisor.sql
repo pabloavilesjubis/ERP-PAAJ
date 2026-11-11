@@ -4,9 +4,19 @@
 -- Si la empresa no tenía datos fiscales (tenant_emisor) la validación "¿es
 -- para esta empresa?" se saltaba y cualquier DTE del buzón entraba como
 -- compra, incluidas las copias de las ventas que la propia empresa emite.
--- Ahora: sin datos fiscales se rechaza, y un DTE cuyo emisor es la propia
--- empresa también.
+-- Ahora:
+--  * El receptor debe coincidir con la empresa por NIT, NRC o DUI (persona
+--    natural: el DUI del titular o el NIT homologado al DUI). Sin datos del
+--    receptor o sin datos fiscales de la empresa, se rechaza.
+--  * Un DTE cuyo emisor es la propia empresa (copia de una venta) se rechaza.
+--  * CCF, NC y ND (03, 05, 06) dan crédito fiscal. Factura de consumidor final
+--    (01) y de exportación (11) se registran como compra SIN crédito: el IVA es
+--    parte del costo (iva = 0, metadata.ivaNoDeducible). Otros tipos
+--    (retención, remisión…) no son compras: se rechazan.
 -- =============================================================================
+
+ALTER TABLE public.tenant_emisor ADD COLUMN IF NOT EXISTS emisor_dui TEXT;
+COMMENT ON COLUMN public.tenant_emisor.emisor_dui IS 'DUI del titular (persona natural): identifica a la empresa como receptor de DTEs';
 
 CREATE OR REPLACE FUNCTION accounting.ingest_received_dte(p_tenant BIGINT, p_doc JSONB, p_raw JSONB, p_source TEXT, p_meta JSONB)
 RETURNS JSONB LANGUAGE plpgsql AS $$
@@ -23,6 +33,10 @@ DECLARE
   v_id      BIGINT;
   v_nit     TEXT := accounting.digits(p_doc->>'issuer_nit');
   v_nrc     TEXT := accounting.digits(p_doc->>'issuer_nrc');
+  v_rnit    TEXT := coalesce(accounting.digits(p_doc->>'receiver_nit'), '');
+  v_rnrc    TEXT := coalesce(accounting.digits(p_doc->>'receiver_nrc'), '');
+  v_rdui    TEXT := coalesce(accounting.digits(p_doc->>'receiver_dui'), '');
+  v_credito BOOLEAN := (p_doc->>'document_type') IN ('03', '05', '06');
 BEGIN
   IF coalesce(v_code, '') = '' THEN RAISE EXCEPTION 'El DTE no tiene código de generación' USING ERRCODE = '22023'; END IF;
 
@@ -48,15 +62,19 @@ BEGIN
     ELSIF v_nit = accounting.digits(v_emisor.mh_nit) OR (v_nrc <> '' AND v_nrc = accounting.digits(v_emisor.emisor_nrc)) THEN
       v_status := 'rechazado';
       v_detail := 'Es un DTE emitido por esta misma empresa (una venta), no una compra';
-    ELSIF (NULLIF(accounting.digits(p_doc->>'receiver_nit'), '') IS NOT NULL OR NULLIF(accounting.digits(p_doc->>'receiver_nrc'), '') IS NOT NULL)
-       AND accounting.digits(p_doc->>'receiver_nit') <> accounting.digits(v_emisor.mh_nit)
-       AND accounting.digits(p_doc->>'receiver_nrc') <> accounting.digits(v_emisor.emisor_nrc) THEN
+    ELSIF v_rnit = '' AND v_rnrc = '' AND v_rdui = '' THEN
       v_status := 'rechazado';
-      v_detail := 'El receptor del DTE (' || coalesce(p_doc->>'receiver_name', '') || ') no es esta empresa';
+      v_detail := 'El DTE no identifica al receptor (sin NIT, NRC ni DUI): no se puede saber si es para esta empresa';
+    ELSIF NOT ((v_rnit <> '' AND v_rnit = accounting.digits(v_emisor.mh_nit))
+            OR (v_rnrc <> '' AND v_rnrc = accounting.digits(v_emisor.emisor_nrc))
+            OR (v_rdui <> '' AND v_rdui = coalesce(accounting.digits(v_emisor.emisor_dui), ''))
+            OR (v_rdui <> '' AND v_rdui = accounting.digits(v_emisor.mh_nit))) THEN
+      v_status := 'rechazado';
+      v_detail := 'El receptor del DTE (' || coalesce(NULLIF(p_doc->>'receiver_name', ''), 'sin nombre') || ') no es esta empresa';
     END IF;
   END IF;
-  IF v_status = 'registrado' AND v_type = '01' THEN
-    v_status := 'rechazado'; v_detail := 'Factura de consumidor final: no da crédito fiscal (pide CCF al proveedor)';
+  IF v_status = 'registrado' AND v_type NOT IN ('01', '03', '05', '06', '11') THEN
+    v_status := 'rechazado'; v_detail := 'El documento tipo ' || coalesce(v_type, '?') || ' no es una compra';
   END IF;
   IF v_status = 'registrado' AND v_stamp IS NULL THEN
     v_status := 'rechazado'; v_detail := 'El DTE no tiene sello de recepción del MH';
@@ -78,19 +96,25 @@ BEGIN
     INSERT INTO public.compras (tenant_id, fecha, proveedor_nombre, proveedor_nit, proveedor_nrc, descripcion, gravado, exento, iva, total, metadata)
     VALUES (p_tenant, coalesce(NULLIF(p_doc->>'issue_date', '')::DATE, accounting.today()), coalesce(NULLIF(btrim(p_doc->>'issuer_name'), ''), 'Proveedor'),
             NULLIF(v_nit, ''), NULLIF(v_nrc, ''), NULLIF(p_doc->>'description', ''),
-            coalesce((p_doc->>'taxable_amount')::NUMERIC, 0),
+            -- Sin crédito fiscal el IVA es costo: la base es el total menos lo exento
+            CASE WHEN v_credito THEN coalesce((p_doc->>'taxable_amount')::NUMERIC, 0)
+                 ELSE coalesce((p_doc->>'total_amount')::NUMERIC, 0) - coalesce((p_doc->>'exempt_amount')::NUMERIC, 0)
+                      - coalesce((p_doc->>'non_subject_amount')::NUMERIC, 0) END,
             coalesce((p_doc->>'exempt_amount')::NUMERIC, 0) + coalesce((p_doc->>'non_subject_amount')::NUMERIC, 0),
-            coalesce((p_doc->>'iva_amount')::NUMERIC, 0), coalesce((p_doc->>'total_amount')::NUMERIC, 0),
+            CASE WHEN v_credito THEN coalesce((p_doc->>'iva_amount')::NUMERIC, 0) ELSE 0 END,
+            coalesce((p_doc->>'total_amount')::NUMERIC, 0),
             jsonb_strip_nulls(jsonb_build_object(
               'claseDocumento', '4', 'tipoDocumento', v_type, 'numeroDocumento', v_code, 'codigoGeneracion', v_code,
               'numeroControl', v_ctrl, 'selloRecibido', v_stamp, 'nit', NULLIF(v_nit, ''), 'source', 'imported', 'origen', 'buzon',
               'tipoOperacion', '1', 'clasificacion', '2',
+              'ivaNoDeducible', CASE WHEN NOT v_credito THEN to_char(coalesce((p_doc->>'iva_amount')::NUMERIC, 0), 'FM999999990.00') END,
               'ivaPercibido', CASE WHEN (p_doc->>'iva_perceived')::NUMERIC > 0 THEN to_char((p_doc->>'iva_perceived')::NUMERIC, 'FM999999990.00') END,
               'ivaRetenido', CASE WHEN (p_doc->>'iva_withheld')::NUMERIC > 0 THEN to_char((p_doc->>'iva_withheld')::NUMERIC, 'FM999999990.00') END,
               'retencionRenta', CASE WHEN (p_doc->>'income_tax_withheld')::NUMERIC > 0 THEN to_char((p_doc->>'income_tax_withheld')::NUMERIC, 'FM999999990.00') END,
               'otrosTributos', CASE WHEN (p_doc->>'other_taxes')::NUMERIC > 0 THEN to_char((p_doc->>'other_taxes')::NUMERIC, 'FM999999990.00') END)))
     RETURNING id INTO v_compra;
-    v_detail := 'Registrado en el libro de compras';
+    v_detail := CASE WHEN v_credito THEN 'Registrado en el libro de compras'
+                     ELSE 'Registrado como compra sin crédito fiscal (el IVA no se deduce)' END;
   END IF;
 
   INSERT INTO accounting.received_dtes (tenant_id, source, status, detail, generation_code, control_number, reception_stamp, document_type,

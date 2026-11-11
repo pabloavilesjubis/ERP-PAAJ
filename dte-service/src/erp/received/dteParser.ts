@@ -71,7 +71,7 @@ export interface ParsedDte {
   controlNumber: string
   receptionStamp: string | null
   issuer: DteIssuer
-  receiver: { nit: string; nrc: string; name: string } | null
+  receiver: { nit: string; nrc: string; dui: string; name: string } | null
   taxableAmount: number
   exemptAmount: number
   nonSubjectAmount: number
@@ -207,8 +207,16 @@ export function parseDteJson(rawText: string): DteParseOutcome {
   if (!issuer.name) warnings.push('No se encontró el nombre del emisor.')
   if (!issuer.nrc && documentType !== '14') warnings.push('No se encontró el NRC del emisor.')
 
-  const receiver = dte.receptor
-    ? { nit: digits(dte.receptor.nit), nrc: digits(dte.receptor.nrc), name: String(dte.receptor.nombre ?? '').trim() }
+  // CCF trae receptor.nit; la factura de consumidor final, tipoDocumento + numDocumento (13 DUI, 36 NIT)
+  const r = dte.receptor as (DteParty & { tipoDocumento?: string | null; numDocumento?: string | null }) | null | undefined
+  const docNum = digits(r?.numDocumento)
+  const receiver = r
+    ? {
+        nit: digits(r.nit) || (r.tipoDocumento === '36' ? docNum : ''),
+        nrc: digits(r.nrc),
+        dui: r.tipoDocumento === '13' ? docNum : '',
+        name: String(r.nombre ?? '').trim(),
+      }
     : null
 
   const ivaAmount = round2(extractIva(resumen, items))

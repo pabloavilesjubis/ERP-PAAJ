@@ -70,6 +70,36 @@ describe.skipIf(!hasDb)('posición fiscal, DTEs recibidos, importaciones y activ
     expect((await query('SELECT count(*)::int n FROM compras WHERE tenant_id = $1', [sinDatos.tenantId])).rows[0]!.n).toBe(0);
   });
 
+  it('DTEs recibidos: el receptor debe ser la empresa (NIT, NRC o DUI); la factura de consumidor final entra sin crédito', async () => {
+    const { query } = await db();
+    await query("UPDATE tenant_emisor SET emisor_dui = '012345678' WHERE tenant_id = $1", [t.tenantId]);
+    const fcf = (code: string, receptor: Record<string, unknown> | null) => supplierDte(code, {
+      identificacion: { tipoDte: '01', numeroControl: `DTE-01-ABCD1234-${code.slice(0, 15).padStart(15, '0')}`, codigoGeneracion: code, fecEmi: '2026-11-12' },
+      receptor,
+      resumen: { totalGravada: 113, totalExenta: 0, totalNoSuj: 0, totalIva: 13, montoTotalOperacion: 113, totalPagar: 113 } });
+    const res = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files: [
+      // Noviembre: fuera de los meses que cuadran las pruebas de posición fiscal
+      { name: 'ccf-por-nrc.json', content: supplierDte('F1F1F1F1-1111-2222-3333-444444444444', { receptor: { nrc: '1234567', nombre: 'EMPRESA DE PRUEBA' },
+        identificacion: { tipoDte: '03', numeroControl: 'DTE-03-ABCD1234-0000000F1F1F1F1', codigoGeneracion: 'F1F1F1F1-1111-2222-3333-444444444444', fecEmi: '2026-11-10' } }) },
+      { name: 'fcf-dui.json', content: fcf('F2F2F2F2-1111-2222-3333-444444444444', { tipoDocumento: '13', numDocumento: '01234567-8', nombre: 'TITULAR' }) },
+      { name: 'fcf-anonima.json', content: fcf('F3F3F3F3-1111-2222-3333-444444444444', null) },
+      { name: 'fcf-otro-dui.json', content: fcf('F4F4F4F4-1111-2222-3333-444444444444', { tipoDocumento: '13', numDocumento: '099999999', nombre: 'OTRA PERSONA' }) },
+      { name: 'retencion.json', content: supplierDte('F5F5F5F5-1111-2222-3333-444444444444', {
+        identificacion: { tipoDte: '07', numeroControl: 'DTE-07-ABCD1234-000000000000001', codigoGeneracion: 'F5F5F5F5-1111-2222-3333-444444444444', fecEmi: '2026-11-12' } }) },
+    ] } });
+    const r = res.json().results as Array<{ status: string; detail: string }>;
+    expect(r.map(x => x.status)).toEqual(['registrado', 'registrado', 'rechazado', 'rechazado', 'rechazado']);
+    expect(r[1]!.detail).toMatch(/sin crédito fiscal/);
+    expect(r[2]!.detail).toMatch(/no identifica al receptor/);
+    expect(r[3]!.detail).toMatch(/no es esta empresa/);
+    expect(r[4]!.detail).toMatch(/no es una compra/);
+    const c = (await query<{ gravado: string; iva: string; total: string; metadata: Record<string, string> }>(
+      "SELECT gravado, iva, total, metadata FROM compras WHERE tenant_id = $1 AND metadata->>'numeroDocumento' = 'F2F2F2F2-1111-2222-3333-444444444444'", [t.tenantId])).rows[0]!;
+    expect([Number(c.gravado), Number(c.iva), Number(c.total)]).toEqual([113, 0, 113]);
+    expect(c.metadata.ivaNoDeducible).toBe('13.00');
+    expect(c.metadata.tipoDocumento).toBe('01');
+  });
+
   it('importación: valida la ley y contabiliza solo lo pagado en aduana', async () => {
     const before = await balances(app, t);
     const bad = await app.inject({ method: 'POST', url: '/v2/imports', headers: auth(t.token), payload: {
