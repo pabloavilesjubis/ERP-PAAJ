@@ -8,7 +8,7 @@ import { authedPlugin, ctx, parse } from './http.js';
 /**
  * PDF y JSON adjuntos a cada compra (uno de cada tipo), por empresa.
  *
- *   GET    /v2/compras/:id/adjuntos/:kind   descarga el archivo
+ *   GET    /v2/compras/:id/adjuntos/:kind   descarga el archivo (JSON: si no se subió, el del DTE recibido)
  *   PUT    /v2/compras/:id/adjuntos/:kind   sube o reemplaza { filename, content_base64 } (payables:manage)
  *   DELETE /v2/compras/:id/adjuntos/:kind   lo quita (payables:manage)
  *
@@ -50,7 +50,14 @@ export async function registerCompraAdjuntosRoutes(app: FastifyInstance): Promis
       const { id, kind } = params(req.params);
       const res = await query<{ filename: string; mime: string; content: Buffer }>(
         'SELECT filename, mime, content FROM compra_adjuntos WHERE tenant_id = $1 AND compra_id = $2 AND kind = $3', [tenantId, id, kind]);
-      const f = res.rows[0];
+      let f = res.rows[0];
+      if (!f && kind === 'json') {
+        // Compra registrada desde el buzón o la subida de DTEs: su JSON es el DTE recibido
+        const r = await query<{ filename: string; raw: unknown }>(
+          `SELECT coalesce(file_name, generation_code || '.json') AS filename, raw FROM accounting.received_dtes
+            WHERE tenant_id = $1 AND compra_id = $2 ORDER BY id LIMIT 1`, [tenantId, id]);
+        if (r.rows[0]) f = { filename: r.rows[0].filename, mime: KINDS.json, content: Buffer.from(JSON.stringify(r.rows[0].raw, null, 2)) };
+      }
       if (!f) return reply.code(404).send({ success: false, code: 'NOT_FOUND', message: 'La compra no tiene ese adjunto' });
       return reply
         .header('Content-Type', f.mime)

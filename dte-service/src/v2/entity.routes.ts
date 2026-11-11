@@ -122,11 +122,18 @@ export function registerV2EntityRoutes(app: FastifyInstance): void {
     if (q.since) { params.push(q.since); where += ` AND fecha >= $${params.length}`; }
     const limit = Math.min(parseInt(q.limit ?? '5000', 10) || 5000, 50000);
     // Qué adjuntos tiene cada compra (sin el contenido). Tolera la migración 015 sin aplicar.
-    const hasAdj = (await query<{ t: string | null }>("SELECT to_regclass('public.compra_adjuntos') AS t")).rows[0]?.t;
-    const adj = hasAdj
+    const reg = (await query<{ adj: string | null; rec: string | null }>(
+      "SELECT to_regclass('public.compra_adjuntos') AS adj, to_regclass('accounting.received_dtes') AS rec")).rows[0];
+    // El JSON del DTE recibido (buzón o subida) cuenta como adjunto; uno subido a mano lo reemplaza
+    const recibido = reg?.rec
+      ? `(SELECT jsonb_build_object('json', jsonb_build_object('filename', coalesce(r.file_name, r.generation_code || '.json'), 'size', 0))
+            FROM accounting.received_dtes r WHERE r.compra_id = compras.id ORDER BY r.id LIMIT 1)`
+      : 'NULL::JSONB';
+    const subidos = reg?.adj
       ? `(SELECT jsonb_object_agg(a.kind, jsonb_build_object('filename', a.filename, 'size', a.size))
-            FROM compra_adjuntos a WHERE a.compra_id = compras.id) AS adjuntos`
-      : 'NULL::JSONB AS adjuntos';
+            FROM compra_adjuntos a WHERE a.compra_id = compras.id)`
+      : 'NULL::JSONB';
+    const adj = `NULLIF(coalesce(${recibido}, '{}'::jsonb) || coalesce(${subidos}, '{}'::jsonb), '{}'::jsonb) AS adjuntos`;
     const res = await query(`SELECT compras.*, ${adj} FROM compras ${where} ORDER BY fecha DESC, id DESC LIMIT ${limit}`, params);
     return reply.send({ items: res.rows });
   });

@@ -17,7 +17,15 @@ interface DataState {
   loadOk: boolean;
   saving: boolean;
   error: string | null;
+  /** ms de la última carga desde el servidor (para refrescar lo que cambió por detrás). */
+  loadedAt: number;
   init: () => Promise<void>;
+  /**
+   * Vuelve a traer los datos del servidor: lo que registra el backend por su
+   * cuenta (buzón de DTEs, sincronización) no está en memoria. No corre si hay
+   * un guardado en curso. `maxAgeMs`: solo si la última carga es más vieja.
+   */
+  refresh: (opts?: { maxAgeMs?: number }) => Promise<void>;
   set: <K extends AppCollection>(key: K, list: AppData[K]) => Promise<void>;
   patch: (updater: (prev: AppData) => AppData) => Promise<void>;
   replace: (next: AppData) => Promise<void>;
@@ -77,6 +85,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   loadOk: false,
   saving: false,
   error: null,
+  loadedAt: 0,
 
   async init() {
     if (get().loaded) return;
@@ -85,7 +94,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       // Defensa contra adapters / localStorage antiguos que no tienen alguna
       // colección nueva (ej. `productos` antes de la pestaña Facturación).
       // Spread de `empty` primero para garantizar que TODAS las claves existan.
-      set({ data: { ...empty, ...data }, loaded: true, loadOk: true, error: null });
+      set({ data: { ...empty, ...data }, loaded: true, loadOk: true, error: null, loadedAt: Date.now() });
 
       // El SoT de correlativos vive en dte-service. NO se siembra
       // automáticamente desde localStorage — el cache del navegador no es
@@ -153,6 +162,19 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   async replace(next) {
     await persistAndCommit(set, get, next);
+  },
+
+  async refresh(opts) {
+    const st = get();
+    if (!st.loaded || !st.loadOk || st.saving) return;
+    if (opts?.maxAgeMs !== undefined && Date.now() - st.loadedAt < opts.maxAgeMs) return;
+    try {
+      const data = await getAdapter().load();
+      if (get().saving) return;   // un guardado empezó mientras cargaba: se conserva la memoria
+      set({ data: { ...empty, ...data }, loadedAt: Date.now() });
+    } catch {
+      // No crítico: se queda con lo que ya tenía en memoria
+    }
   },
 
   reset() {

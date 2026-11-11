@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { ErrorBanner } from '@/components/ui/Feedback';
 import { usePermissions } from '@/auth/usePermissions';
+import { useDataStore } from '@/stores/data.store';
 
 interface Mailbox {
   id: number; label: string | null; host: string; port: number; username: string; folder: string; enabled: boolean;
@@ -56,6 +57,7 @@ function MailboxRow({ m, onEdit }: { m: Mailbox; onEdit: () => void }) {
   const [hasta, setHasta] = useState(mesActual());
   const [progreso, setProgreso] = useState<{ total: RunSummary; vueltas: number; corriendo: boolean } | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const refreshData = useDataStore(s => s.refresh);
 
   // Revisa en tandas: el backend corta a los 2 minutos y devuelve "partial"; se repite hasta terminar
   async function revisar(rango: { from: string; to: string } | null) {
@@ -76,6 +78,8 @@ function MailboxRow({ m, onEdit }: { m: Mailbox; onEdit: () => void }) {
     } finally {
       void qc.invalidateQueries({ queryKey: ['received'] });
       void qc.invalidateQueries({ queryKey: ['acc'] });
+      // Las compras registradas viven en el almacén del ERP: se trae lo nuevo
+      if (total.imported > 0) void refreshData();
     }
   }
   const borrar = useMutation({

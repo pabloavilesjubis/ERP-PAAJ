@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -227,7 +227,19 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
   const jsonRef = useRef<HTMLInputElement>(null);
   const pdfRef = useRef<HTMLInputElement>(null);
 
-  const rows = data.compras.filter(r => matchesPeriod(r.fecha, mode, month, year));
+  // Lo que registra el buzón de DTEs por su cuenta no está en memoria: se refresca al entrar
+  const refresh = useDataStore(s => s.refresh);
+  useEffect(() => { void refresh({ maxAgeMs: 60_000 }); }, [refresh]);
+
+  const [proveedorFiltro, setProveedorFiltro] = useState('');
+  const delPeriodo = data.compras.filter(r => matchesPeriod(r.fecha, mode, month, year));
+  const proveedoresPeriodo = [...new Set(delPeriodo.map(r => r.proveedor).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const filtro = proveedorFiltro.trim().toLowerCase();
+  const filtroDigitos = filtro.replace(/\D/g, '');
+  const rows = filtro
+    ? delPeriodo.filter(r => r.proveedor.toLowerCase().includes(filtro)
+        || (!!filtroDigitos && (r.nrc ?? '').replace(/\D/g, '').includes(filtroDigitos)))
+    : delPeriodo;
   const totalMonto = rows.reduce((s, r) => s + num(r.monto), 0);
   const totalIva = rows.reduce((s, r) => s + num(r.ivaCredito), 0);
   const totalRetenido = rows.reduce((s, r) => s + num(r.metadata?.retencionRenta ?? 0), 0);
@@ -530,7 +542,14 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--s-5)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--s-3)', marginBottom: 'var(--s-5)', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 'var(--s-2)', alignItems: 'center' }}>
+          <Input list="compras-proveedores" placeholder="Filtrar por proveedor o NRC…" value={proveedorFiltro}
+            onChange={e => setProveedorFiltro(e.target.value)} style={{ width: 300 }} />
+          <datalist id="compras-proveedores">{proveedoresPeriodo.map(p => <option key={p} value={p} />)}</datalist>
+          {proveedorFiltro && <Button variant="secondary" size="sm" onClick={() => setProveedorFiltro('')}>Quitar filtro</Button>}
+          {proveedorFiltro && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{rows.length} de {delPeriodo.length}</span>}
+        </div>
         <Button onClick={openNew} leading={<Icon name="plus" size={15} />}>Agregar compra</Button>
       </div>
 

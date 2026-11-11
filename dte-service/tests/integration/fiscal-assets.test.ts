@@ -48,6 +48,10 @@ describe.skipIf(!hasDb)('posición fiscal, DTEs recibidos, importaciones y activ
     const { query } = await db();
     const compra = await query<{ id: string; metadata: Record<string, string> }>(`SELECT id, metadata FROM compras WHERE tenant_id = $1`, [t.tenantId]);
     expect(compra.rows[0]!.metadata.ivaPercibido).toBe('2.00');
+    // Su JSON es el DTE recibido: se descarga desde la compra sin haberlo subido
+    const json = await app.inject({ method: 'GET', url: `/v2/compras/${compra.rows[0]!.id}/adjuntos/json`, headers: auth(t.token) });
+    expect(json.statusCode).toBe(200);
+    expect(json.json().identificacion.codigoGeneracion).toBe('AAAAAAAA-1111-2222-3333-444444444444');
     const parties = await app.inject({ method: 'GET', url: '/v2/acc/cxp/parties', headers: auth(t.token) });
     expect(parties.json().items[0].party_key).toMatch(/^id:/);
     expect(parties.json().items[0].balance).toBe(228);

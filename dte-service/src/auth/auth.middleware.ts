@@ -70,14 +70,16 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
     if (status.name) req.auth.name = status.name;
   }
 
-  const claimTenantId = claims.tenant_id;
+  // users.tenant_id es BIGINT: llega como texto ("1") en los JWT emitidos desde la base.
+  // Se normaliza a número para que toda comparación del tenant sea consistente.
+  const claimTenantId = claims.tenant_id === null || claims.tenant_id === undefined ? claims.tenant_id : Number(claims.tenant_id);
   const pathSlug = extractSlugFromPath(req);
 
   if (claimTenantId !== null && claimTenantId !== undefined) {
     req.tenantId = claimTenantId;
     if (pathSlug) {
       const tenant = await getTenantBySlug(pathSlug);
-      if (!tenant || tenant.id !== claimTenantId) {
+      if (!tenant || Number(tenant.id) !== claimTenantId) {
         reply.code(403).send({
           success: false, code: 'TENANT_MISMATCH',
           message: `JWT pertenece a tenant ${claimTenantId} pero el path apunta a ${pathSlug}`,
@@ -92,7 +94,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
       reply.code(404).send({ success: false, code: 'TENANT_NOT_FOUND', message: `Slug ${pathSlug} no existe` });
       return reply;
     }
-    req.tenantId = tenant.id;
+    req.tenantId = Number(tenant.id);
     req.tenantSlug = tenant.slug;
   } else {
     reply.code(400).send({

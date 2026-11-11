@@ -30,6 +30,12 @@ describe.skipIf(!hasDb)('Mi empresa: cargar los datos fiscales desde la configur
       emisor_tipo_establecimiento, emisor_departamento, emisor_municipio, emisor_complemento, emisor_email, punto_venta_establecimiento, punto_venta_punto, emisor_dui)
       VALUES ($1, 'sandbox', '06149999990033', 'x', '1', 'x', '1', 'x', '01', '06', '14', 'x', 'x@x.test', 'M001', 'P001', '012345678')`, [paaj.tenantId]);
     expect((await app.inject({ method: 'GET', url: '/v2/company', headers: auth(paaj.token) })).json().server_config).toBe(true);
+    // Como en producción: users.tenant_id es BIGINT y el JWT lo lleva como texto ("1")
+    const { issueJwt } = await import('../../src/auth/local-auth.js');
+    const { query: q2 } = await db();
+    const u = (await q2('SELECT id, email FROM users WHERE tenant_id = $1 LIMIT 1', [paaj.tenantId])).rows[0]!;
+    const tokenTexto = issueJwt({ userId: u.id, email: u.email, tenantId: String(paaj.tenantId) as unknown as number, role: 'admin' });
+    expect((await app.inject({ method: 'GET', url: '/v2/company', headers: auth(tokenTexto) })).json().server_config).toBe(true);
     const res = await app.inject({ method: 'POST', url: '/v2/company/import-server-config', headers: auth(paaj.token), payload: {} });
     expect(res.statusCode, res.body).toBe(200);
     const e = (await app.inject({ method: 'GET', url: '/v2/company', headers: auth(paaj.token) })).json();

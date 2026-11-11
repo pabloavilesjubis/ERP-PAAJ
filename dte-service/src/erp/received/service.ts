@@ -45,14 +45,14 @@ export function decodeJson(bytes: Buffer): string {
 
 /** Un JSON → resultado de ingesta. Errores de lectura se devuelven como texto. */
 export async function ingestText(c: Ctx, text: string, source: 'upload' | 'email', meta: Record<string, unknown>):
-  Promise<{ ok: true; result: IngestResult; warnings: string[]; code: string } | { ok: false; error: string }> {
+  Promise<{ ok: true; result: IngestResult; warnings: string[]; code: string; control: string | null } | { ok: false; error: string }> {
   const parsed = parseDteJson(text);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   if (!parsed.data.generationCode) return { ok: false, error: 'El JSON no tiene código de generación' };
   const d = parsed.data;
   const res = await tx(db => q<{ r: IngestResult }>('SELECT accounting.ingest_received_dte($1, $2::jsonb, $3::jsonb, $4, $5::jsonb) AS r',
     [c.tenantId, JSON.stringify(docForSql(d)), JSON.stringify(d.raw), source, JSON.stringify(meta)], db), c);
-  return { ok: true, result: res.rows[0]!.r, warnings: d.warnings, code: d.generationCode };
+  return { ok: true, result: res.rows[0]!.r, warnings: d.warnings, code: d.generationCode, control: d.controlNumber || null };
 }
 
 // ── IMAP ─────────────────────────────────────────────────────────────────────
@@ -133,8 +133,8 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
       const before = opts.until ? new Date(new Date(`${opts.until}T00:00:00-06:00`).getTime() + 86_400_000) : undefined;
       const found = await client.search({ since: new Date(`${since}T00:00:00-06:00`), ...(before ? { before } : {}) }, { uid: true });
       const uids = (Array.isArray(found) ? found : []).sort((a, b) => a - b);
-      const known = new Map((await q<{ uid: number; status: string; attempts: number }>(
-        'SELECT uid, status, attempts FROM accounting.mail_messages WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = ANY($4::bigint[])',
+      const known = new Map((await q<{ uid: number; status: string; attempts: number; dte_count: number; pdf_checked: boolean }>(
+        'SELECT uid, status, attempts, dte_count, pdf_checked FROM accounting.mail_messages WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = ANY($4::bigint[])',
         [box.id, box.folder, uidValidity, uids])).rows.map(k => [Number(k.uid), k]));
       const todo = uids.filter(uid => {
         const k = known.get(uid);
@@ -153,7 +153,10 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
         sum.scanned++;
         const from = msg.envelope?.from?.[0];
         const header = { mail_from: from ? (from.name ? `${from.name} <${from.address ?? ''}>` : from.address ?? null) : null, mail_subject: msg.envelope?.subject ?? null };
-        const jsons = listAttachments(msg.bodyStructure).filter(a => a.kind === 'json');
+        const attachments = listAttachments(msg.bodyStructure);
+        const jsons = attachments.filter(a => a.kind === 'json');
+        const pdfs = attachments.filter(a => a.kind === 'pdf');
+        const registrados: Array<{ compraId: number; code: string; control: string | null }> = [];
         if (!jsons.length) { await saveMessage(c, box.id, box.folder, uidValidity, uid, 'sin_dte', 0, header, null); continue; }
         const notes: string[] = [];
         let failed = false;
@@ -173,7 +176,10 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
             const out = await ingestText(c, decodeJson(Buffer.concat(chunks)), 'email', { file_name: j.filename, ...header });
             if (!out.ok) { notes.push(`${j.filename}: ${out.error}`); continue; }
             count++;
-            if (out.result.status === 'registrado') sum.imported++;
+            if (out.result.status === 'registrado') {
+              sum.imported++;
+              if (out.result.compra_id) registrados.push({ compraId: out.result.compra_id, code: out.code, control: out.control });
+            }
             else if (out.result.status === 'duplicado') sum.duplicates++;
             else sum.rejected++;
             notes.push(`${out.code}: ${out.result.status}`);
@@ -182,7 +188,44 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
             notes.push(`${j.filename}: ${safeError(e, secrets)}`);
           }
         }
+        // El PDF del correo queda como adjunto de la compra (si es claro a cuál pertenece)
+        if (registrados.length && pdfs.length) {
+          try { await attachMailPdfs(c, client, uid, pdfs, registrados); }
+          catch (e) { notes.push(`PDF: ${safeError(e, secrets)}`); }
+        }
         await saveMessage(c, box.id, box.folder, uidValidity, uid, failed ? 'error' : 'procesado', count, header, notes.join(' · ').slice(0, 1000));
+        await markPdfChecked(box.id, box.folder, uidValidity, uid);
+      }
+
+      // Revisión manual de meses: completa el PDF de las compras de correos procesados antes de que se guardara
+      const backfill = opts.trigger === 'manual' && opts.since && !sum.pending
+        ? uids.filter(uid => { const k = known.get(uid); return k && k.status === 'procesado' && k.dte_count > 0 && !k.pdf_checked; })
+        : [];
+      for (let i = 0; i < backfill.length; i++) {
+        if (Date.now() - started > BUDGET_MS) { sum.pending = backfill.length - i; break; }
+        const uid = backfill[i]!;
+        try {
+          const msg = await client.fetchOne(String(uid), { uid: true, bodyStructure: true }, { uid: true });
+          const att = msg ? listAttachments(msg.bodyStructure) : [];
+          const pdfs = att.filter(a => a.kind === 'pdf');
+          if (pdfs.length) {
+            const registrados: Array<{ compraId: number; code: string; control: string | null }> = [];
+            for (const j of att.filter(a => a.kind === 'json')) {
+              const dl = await client.download(String(uid), j.part, { uid: true, maxBytes: MAX_DTE_JSON_BYTES + 1 });
+              if (!dl.content) continue;
+              const chunks: Buffer[] = [];
+              for await (const chunk of dl.content) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+              const parsed = parseDteJson(decodeJson(Buffer.concat(chunks)));
+              if (!parsed.ok || !parsed.data.generationCode) continue;
+              const r = (await q<{ compra_id: number }>(
+                `SELECT compra_id FROM accounting.received_dtes WHERE tenant_id = $1 AND upper(generation_code) = upper($2)
+                   AND status = 'registrado' AND compra_id IS NOT NULL LIMIT 1`, [c.tenantId, parsed.data.generationCode])).rows[0];
+              if (r) registrados.push({ compraId: Number(r.compra_id), code: parsed.data.generationCode, control: parsed.data.controlNumber || null });
+            }
+            if (registrados.length) await attachMailPdfs(c, client, uid, pdfs, registrados);
+          }
+          await markPdfChecked(box.id, box.folder, uidValidity, uid);
+        } catch (e) { sum.errors++; }
       }
     } finally {
       lock.release();
@@ -197,6 +240,48 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
   await q(`UPDATE accounting.mailboxes SET last_run_at = NOW(), last_status = $2, last_detail = $3 WHERE id = $1`,
     [box.id, sum.status, sum.detail ?? `${sum.imported} registrados, ${sum.duplicates} duplicados, ${sum.rejected} rechazados de ${sum.scanned} correos`]);
   return sum;
+}
+
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Guarda el PDF del correo como adjunto de la compra registrada. Con un solo
+ * DTE en el correo, el primer PDF es suyo; con varios, cada PDF va con el DTE
+ * cuyo código de generación o número de control aparece en el nombre del
+ * archivo (si no es claro, no se adivina). Nunca reemplaza un PDF ya subido.
+ */
+async function attachMailPdfs(c: Ctx, client: ImapFlow, uid: number, pdfs: Attachment[],
+  registrados: Array<{ compraId: number; code: string; control: string | null }>): Promise<void> {
+  const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const pares: Array<{ pdf: Attachment; compraId: number }> = [];
+  if (registrados.length === 1) pares.push({ pdf: pdfs[0]!, compraId: registrados[0]!.compraId });
+  else {
+    for (const r of registrados) {
+      const pdf = pdfs.find(p => norm(p.filename).includes(norm(r.code)) || (r.control && norm(p.filename).includes(norm(r.control))));
+      if (pdf) pares.push({ pdf, compraId: r.compraId });
+    }
+  }
+  for (const { pdf, compraId } of pares) {
+    const dl = await client.download(String(uid), pdf.part, { uid: true, maxBytes: MAX_PDF_BYTES + 1 });
+    if (!dl.content) continue;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of dl.content) {
+      const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      size += b.length; chunks.push(b);
+      if (size > MAX_PDF_BYTES) break;
+    }
+    const content = Buffer.concat(chunks);
+    if (size > MAX_PDF_BYTES || content.subarray(0, 5).toString('latin1') !== '%PDF-') continue;
+    await q(`INSERT INTO public.compra_adjuntos (tenant_id, compra_id, kind, filename, mime, size, content, uploaded_by)
+             VALUES ($1, $2, 'pdf', $3, 'application/pdf', $4, $5, 'Buzón DTE') ON CONFLICT (compra_id, kind) DO NOTHING`,
+      [c.tenantId, compraId, pdf.filename || 'dte.pdf', content.length, content]);
+  }
+}
+
+async function markPdfChecked(mailboxId: number, folder: string, uidValidity: string, uid: number): Promise<void> {
+  await q('UPDATE accounting.mail_messages SET pdf_checked = true WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = $4',
+    [mailboxId, folder, uidValidity, uid]);
 }
 
 async function saveMessage(c: Ctx, mailboxId: number, folder: string, uidValidity: string, uid: number, status: string, count: number,

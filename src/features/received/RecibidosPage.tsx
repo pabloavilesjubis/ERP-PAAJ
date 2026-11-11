@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorBanner, Loading } from '@/components/ui/Feedback';
 import { usePermissions } from '@/auth/usePermissions';
 import { dmy, money } from '@/features/accounting/format';
+import { useDataStore } from '@/stores/data.store';
 import { Mailboxes } from './Mailboxes';
 
 interface Received {
@@ -31,6 +32,7 @@ export function RecibidosPage() {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<UploadResult[] | null>(null);
   const [showRaw, setShowRaw] = useState<number | null>(null);
+  const refreshData = useDataStore(s => s.refresh);
   const list = useQuery({
     queryKey: ['received', status, search],
     queryFn: () => api.get<{ items: Received[] }>(`/v2/received?${new URLSearchParams({ ...(status ? { status } : {}), ...(search ? { q: search } : {}) })}`).then(r => r.items),
@@ -40,7 +42,12 @@ export function RecibidosPage() {
       const payload = await Promise.all(files.map(async f => ({ name: f.name, content: await f.text() })));
       return api.post<{ results: UploadResult[] }>('/v2/received/upload', { files: payload });
     },
-    onSuccess: r => { setResults(r.results); void qc.invalidateQueries({ queryKey: ['received'] }); void qc.invalidateQueries({ queryKey: ['acc'] }); },
+    onSuccess: r => {
+      setResults(r.results);
+      void qc.invalidateQueries({ queryKey: ['received'] });
+      void qc.invalidateQueries({ queryKey: ['acc'] });
+      if (r.results.some(x => x.status === 'registrado')) void refreshData();   // las compras nuevas al almacén del ERP
+    },
   });
   return (
     <div>
