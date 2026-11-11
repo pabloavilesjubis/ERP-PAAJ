@@ -25,6 +25,18 @@ function tid(req: FastifyRequest): number {
   return id;
 }
 
+/** Clave de unicidad de una venta con DTE (migración 016). */
+const VENTA_DTE_KEY = "upper(COALESCE(NULLIF(metadata->>'codigoGeneracion', ''), metadata->>'numeroDocumento'))";
+const UUID_RE = '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$';
+let ventaDteIndex: boolean | null = null;
+/** El ON CONFLICT exige el índice; mientras la migración 016 no se aplique se inserta como antes. */
+async function hasVentaDteIndex(): Promise<boolean> {
+  if (ventaDteIndex) return true;
+  const r = await query<{ t: string | null }>("SELECT to_regclass('public.ventas_dte_codigo_unico') AS t");
+  ventaDteIndex = !!r.rows[0]?.t;
+  return ventaDteIndex;
+}
+
 export function registerV2EntityRoutes(app: FastifyInstance): void {
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/v2/ventas') && !req.url.startsWith('/v2/compras')
@@ -54,20 +66,27 @@ export function registerV2EntityRoutes(app: FastifyInstance): void {
     if (kind !== 'consumidor' && kind !== 'contribuyente') {
       throw new ValidationError('kind debe ser consumidor|contribuyente');
     }
+    const params = [
+      tid(req), kind, v.dte_id ?? null, v.fecha, v.descripcion ?? '',
+      v.monto ?? null, v.gravado ?? null, v.exento ?? null, v.iva ?? null,
+      v.cliente_nombre ?? null, v.cliente_nrc ?? null, v.cliente_nit ?? null,
+      v.notas ?? null, JSON.stringify(v.metadata ?? {}),
+    ];
     const res = await query<{ id: number }>(`
       INSERT INTO ventas (
         tenant_id, kind, dte_id, fecha, descripcion,
         monto, gravado, exento, iva,
         cliente_nombre, cliente_nrc, cliente_nit, notas, metadata
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::JSONB)
+      ${await hasVentaDteIndex() ? `ON CONFLICT (tenant_id, (${VENTA_DTE_KEY})) WHERE ${VENTA_DTE_KEY} ~ '${UUID_RE}' DO NOTHING` : ''}
       RETURNING id
-    `, [
-      tid(req), kind, v.dte_id ?? null, v.fecha, v.descripcion ?? '',
-      v.monto ?? null, v.gravado ?? null, v.exento ?? null, v.iva ?? null,
-      v.cliente_nombre ?? null, v.cliente_nrc ?? null, v.cliente_nit ?? null,
-      v.notas ?? null, JSON.stringify(v.metadata ?? {}),
-    ]);
-    return reply.send({ id: res.rows[0]!.id });
+    `, params);
+    if (res.rows[0]) return reply.send({ id: res.rows[0].id });
+    // Ese DTE ya tenía su venta (otra pestaña o una sincronización previa): se devuelve la existente
+    const meta = (v.metadata ?? {}) as Record<string, unknown>;
+    const key = String((meta.codigoGeneracion || meta.numeroDocumento) ?? '').toUpperCase();
+    const existing = await query<{ id: number }>(`SELECT id FROM ventas WHERE tenant_id = $1 AND ${VENTA_DTE_KEY} = $2`, [tid(req), key]);
+    return reply.send({ id: existing.rows[0]!.id, existing: true });
   });
 
   app.put('/v2/ventas/:id', async (req, reply) => {

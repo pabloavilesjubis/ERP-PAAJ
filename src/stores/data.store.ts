@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { getAdapter } from '@/lib/data';
 import { syncDtesFromApi, type SyncResult } from '@/lib/dte/sync';
+import { usesTenantDteApi } from '@/lib/dte/tenant-routing';
 import type { AppData, AppCollection } from '@/types/domain';
 
 interface DataState {
@@ -93,12 +94,13 @@ export const useDataStore = create<DataState>((set, get) => ({
       // que un humano siembre, las emisiones fallan con CORRELATIVO_NOT_SEEDED.
       // (Removido a propósito: el auto-sembrado desde data.correlativosDte.)
 
-      // Post-load: traer DTEs emitidos vía API externa (BEON) que no
-      // pasaron por la UI. SOLO corre en modo legacy single-tenant — en SaaS
-      // (api adapter) este sync NO existe; el ApiAdapter ya carga todo vía
-      // /v2/* directamente.
-      const isLegacy = getAdapter().kind !== 'api';
-      if (isLegacy) {
+      // Post-load: traer DTEs emitidos vía API externa (BEON) que no pasaron
+      // por la UI. Viven en el almacén de las rutas originales, que es de PAAJ
+      // (tenant 1): corre para PAAJ y en modo local, nunca para otra empresa.
+      // Antes solo corría en modo local y en producción (adapter api) dependía
+      // del botón "Sincronizar DTEs": las ventas de BEON dejaron de entrar.
+      // El backend rechaza la venta duplicada de un DTE (migración 016).
+      if (!usesTenantDteApi()) {
         const kickSync = () => {
           void get().syncDtes().then(r => {
             if (r.ok && (r.added + r.updated) > 0) {
