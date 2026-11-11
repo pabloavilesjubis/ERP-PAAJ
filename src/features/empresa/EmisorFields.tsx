@@ -43,7 +43,8 @@ export function EmisorFields({ e, setE, requirePasswords, showPasswords = true }
   e: Emisor; setE: (e: Emisor) => void; requirePasswords: boolean; showPasswords?: boolean;
 }) {
   const f = (k: keyof Emisor) => ({ value: (e[k] as string | null) ?? '', onChange: (ev: { target: { value: string } }) => setE({ ...e, [k]: ev.target.value }) });
-  const pw = requirePasswords ? '' : ' (vacío = conservar)';
+  // Las claves solo hacen falta para emitir: al registrar son opcionales
+  const pw = requirePasswords ? ' (opcional, para emitir)' : ' (vacío = conservar)';
   const munis = getMunicipiosFor(e.emisor_departamento);
   const nitDigits = e.mh_nit.replace(/\D/g, '');
   return (

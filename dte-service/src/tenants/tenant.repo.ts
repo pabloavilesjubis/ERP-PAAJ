@@ -66,8 +66,8 @@ interface TenantEmisorRow {
   tenant_id: number;
   mh_env: TenantEmisorFull['mh_env'];
   mh_nit: string;
-  mh_password_enc: string;
-  firmador_password_enc: string;
+  mh_password_enc: string | null;
+  firmador_password_enc: string | null;
   cert_path: string;
   emisor_nrc: string;
   emisor_nombre: string;
@@ -95,8 +95,9 @@ export async function getEmisor(tenantId: number): Promise<TenantEmisorFull | nu
   const { mh_password_enc, firmador_password_enc, ...rest } = row;
   return {
     ...rest,
-    mh_password: decryptSecret(mh_password_enc),
-    firmador_password: decryptSecret(firmador_password_enc),
+    // Vacías si la empresa registró sus datos fiscales sin claves (migración 019)
+    mh_password: mh_password_enc ? decryptSecret(mh_password_enc) : '',
+    firmador_password: firmador_password_enc ? decryptSecret(firmador_password_enc) : '',
   };
 }
 

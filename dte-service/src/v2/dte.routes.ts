@@ -43,6 +43,13 @@ const EmitBody = z.object({
   data: z.record(z.unknown()),
 });
 
+/** Para emitir o anular hacen falta la clave API del MH y la del certificado (opcionales al registrar). */
+function assertCredenciales(e: { mh_password: string; firmador_password: string }): void {
+  if (!e.mh_password || !e.firmador_password) {
+    throw new ValidationError('Para emitir, carga en Mi empresa la clave API del MH y la clave del certificado');
+  }
+}
+
 export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void {
   app.addHook('preHandler', async (req, reply) => {
     // Allowlist de rutas PÚBLICAS bajo /v2/ que NO deben gatear JWT acá:
@@ -72,6 +79,7 @@ export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void 
         { tenantId },
       );
     }
+    assertCredenciales(emisor);
     const tenantCfg = configForTenant(globalCfg, emisor);
     const codigoTipo = TIPO_TO_CODIGO[tipo];
 
@@ -246,6 +254,7 @@ export function registerV2Routes(app: FastifyInstance, globalCfg: Config): void 
 
     const emisor = await getEmisor(tenantId);
     if (!emisor) throw new ValidationError('tenant_emisor no configurado', { tenantId });
+    assertCredenciales(emisor);
     const tenantCfg = configForTenant(globalCfg, emisor);
     const evento = buildAnulacion(tenantCfg, partial as AnulacionInput);
     validateAgainstSchema('anulacion', evento);

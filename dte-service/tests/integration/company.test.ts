@@ -29,9 +29,10 @@ describe.skipIf(!hasDb)('Mi empresa (/v2/company)', () => {
     // el certificado se asocia al NIT: primero los datos fiscales
     expect((await app.inject({ method: 'POST', url: '/v2/company/cert', headers: auth(t.token), payload: { cert_base64: CERT } })).statusCode).toBe(400);
 
+    // Sin claves se registra (sirven solo para emitir); el checklist las marca pendientes
     const noPw = await app.inject({ method: 'PUT', url: '/v2/company/emisor', headers: auth(t.token), payload: EMISOR });
-    expect(noPw.statusCode).toBe(400);
-    expect(noPw.json().message).toMatch(/clave/i);
+    expect(noPw.statusCode, noPw.body).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/v2/company', headers: auth(t.token) })).json().checklist.credentials).toBe(false);
     const ok = await app.inject({ method: 'PUT', url: '/v2/company/emisor', headers: auth(t.token), payload: { ...EMISOR, mh_password: 'api', firmador_password: 'firma' } });
     expect(ok.statusCode, ok.body).toBe(200);
     const again = await app.inject({ method: 'PUT', url: '/v2/company/emisor', headers: auth(t.token), payload: { ...EMISOR, emisor_telefono: '2222-2222' } });

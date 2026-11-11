@@ -62,6 +62,18 @@ describe.skipIf(!hasDb)('DTE v2 por empresa', () => {
       .toBe('15');   // la otra empresa no se mueve
   });
 
+  it('una empresa con datos fiscales pero sin claves no emite y dice qué falta', async () => {
+    const { upsertEmisor, EmisorInput } = await import('../../src/tenants/emisor.service.js');
+    const sinClaves = await createTenant();
+    await upsertEmisor(sinClaves.tenantId, EmisorInput.parse({ mh_env: 'sandbox', mh_nit: '06149999990044', emisor_nrc: '7654321', emisor_nombre: 'SIN CLAVES',
+      emisor_cod_actividad: '96092', emisor_desc_actividad: 'Servicios', emisor_tipo_establecimiento: '02', emisor_departamento: '06',
+      emisor_municipio: '14', emisor_complemento: 'San Salvador', emisor_telefono: '22220000', emisor_email: 'fe@test.sv',
+      punto_venta_establecimiento: 'M001', punto_venta_punto: 'P001' }));
+    const res = await app.inject({ method: 'POST', url: '/v2/dte/emit', headers: auth(sinClaves.token), payload: { tipo: 'fcf', data: FCF } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/clave API del MH/);
+  });
+
   const annul = () => ({
     tipoDte: '01', codigoGeneracion: codGen, selloRecibido: 'S'.repeat(40), numeroControl: 'DTE-01-M001P001-000000000000061',
     fecEmi: new Date().toISOString().slice(0, 10), montoIva: 13, tipoDocumentoReceptor: '13', numDocumentoReceptor: '123456789',

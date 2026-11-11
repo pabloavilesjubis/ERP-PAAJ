@@ -16,6 +16,8 @@ interface Company {
   tenant: { id: number; slug: string; nombre_legal: string; nombre_comercial: string | null; status: string };
   emisor: (Emisor & { has_mh_password: boolean; has_firmador_password: boolean; updated_at: string }) | null;
   cert: { present: boolean };
+  /** La empresa emite con la configuración del servidor (PAAJ) y puede copiarla aquí. */
+  server_config?: boolean;
   correlativos: Array<{ tipo_dte: string; seeded: boolean; ultimo_consumido: number }>;
   checklist: { general: boolean; fiscal: boolean; credentials: boolean; cert: boolean; correlativos: boolean };
 }
@@ -123,6 +125,10 @@ function FiscalTab({ c }: { c: Company }) {
     mutationFn: () => api.put<{ result: 'created' | 'updated' }>('/v2/company/emisor', cleanEmisor(e)),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['company'] }),
   });
+  const importar = useMutation({
+    mutationFn: () => api.post<{ result: 'created' | 'updated' }>('/v2/company/import-server-config', {}),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['company'] }),
+  });
   const test = useMutation({
     mutationFn: () => api.post<{ ok: boolean; error?: string }>('/v2/company/test-mh',
       { mh_env: e.mh_env, mh_nit: e.mh_nit.replace(/\D/g, ''), mh_password: e.mh_password || undefined }),
@@ -131,11 +137,23 @@ function FiscalTab({ c }: { c: Company }) {
   const first = !c.emisor;
   return (
     <>
-      <ErrorBanner error={save.error ?? test.error} />
+      <ErrorBanner error={save.error ?? test.error ?? importar.error} />
       {save.isSuccess && <div className="banner banner-success">Datos fiscales guardados.</div>}
-      {first && <div className="banner banner-info" style={{ marginBottom: 10 }}>
-        Estos datos salen en cada DTE que emitas. La clave API se genera en el portal de facturación electrónica del MH y la clave del
-        certificado es la que definiste al descargarlo. Se guardan cifradas y nunca se muestran.
+      {importar.isSuccess && <div className="banner banner-success">Datos fiscales cargados desde la configuración del servidor. Revisa y agrega tu DUI si eres persona natural.</div>}
+      {c.server_config && (
+        <div className="banner banner-info" style={{ marginBottom: 10, alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>Esta empresa emite con la configuración del servidor (BEON / POS). Puedes copiar aquí esos mismos datos fiscales y claves.</span>
+          <Button variant="secondary" disabled={importar.isPending}
+            onClick={() => { if (!c.emisor || confirm('¿Reemplazar los datos fiscales con los de la configuración del servidor? El DUI del titular se conserva.')) importar.mutate(); }}>
+            {importar.isPending ? 'Cargando…' : 'Cargar desde el servidor'}
+          </Button>
+        </div>
+      )}
+      {first && !c.server_config && <div className="banner banner-info" style={{ marginBottom: 10 }}>
+        <span>
+          Estos datos salen en cada DTE que emitas y sirven para validar los DTE que recibes. Las claves (API del MH y del certificado) solo
+          hacen falta para emitir: puedes guardar sin ellas y agregarlas después. Se guardan cifradas y nunca se muestran.
+        </span>
       </div>}
       <EmisorFields e={e} setE={setE} requirePasswords={first} />
       <div className="toolbar" style={{ marginTop: 10 }}>

@@ -46,7 +46,7 @@ describe.skipIf(!hasDb)('consola de plataforma (tenants)', () => {
       emisor_desc_actividad: 'Comercio', emisor_tipo_establecimiento: '02', emisor_departamento: '06', emisor_municipio: '14', emisor_complemento: 'San Salvador',
       emisor_telefono: '2222-0000', emisor_email: 'fe@acme.test', punto_venta_establecimiento: 'M001', punto_venta_punto: 'P001' };
     const noPw = await app.inject({ method: 'PUT', url: `/v2/admin/tenants/${tenantId}/emisor`, headers: auth(adminToken), payload: emisor });
-    expect(noPw.statusCode).toBe(400);   // la primera vez exige las claves
+    expect(noPw.statusCode, noPw.body).toBe(200);   // las claves son opcionales (solo para emitir)
     const ok = await app.inject({ method: 'PUT', url: `/v2/admin/tenants/${tenantId}/emisor`, headers: auth(adminToken), payload: { ...emisor, mh_password: 'x', firmador_password: 'y' } });
     expect(ok.statusCode, ok.body).toBe(200);
     const edit = await app.inject({ method: 'PUT', url: `/v2/admin/tenants/${tenantId}/emisor`, headers: auth(adminToken), payload: { ...emisor, emisor_telefono: '2222-2222' } });

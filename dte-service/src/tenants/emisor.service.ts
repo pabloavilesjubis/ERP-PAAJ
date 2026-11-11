@@ -62,19 +62,18 @@ export async function assertNitAvailable(tenantId: number | null, nit: string, d
   if (other.rows.length) throw new ValidationError('Ese NIT ya está registrado en otra empresa del sistema');
 }
 
-/** Crea o actualiza los datos fiscales. Claves vacías = conservar las guardadas. Con `db`, dentro de esa transacción. */
+/** Crea o actualiza los datos fiscales. Claves opcionales; vacías = conservar las guardadas. Con `db`, dentro de esa transacción. */
 export async function upsertEmisor(tenantId: number, e: EmisorData, db: Db = { query }): Promise<'created' | 'updated'> {
   await assertNitAvailable(tenantId, e.mh_nit, db);
   const existing = await db.query('SELECT 1 FROM tenant_emisor WHERE tenant_id = $1', [tenantId]);
   const vals = EMISOR_COLS.map(k => (e as Record<string, unknown>)[k] ?? null);
   if (!existing.rows.length) {
-    if (!e.mh_password || !e.firmador_password) {
-      throw new ValidationError('Para registrar los datos fiscales indica la clave API del MH y la clave del certificado (firmador)');
-    }
     await db.query(`
       INSERT INTO tenant_emisor (tenant_id, ${EMISOR_COLS.join(', ')}, mh_password_enc, firmador_password_enc, cert_path)
       VALUES ($1, ${EMISOR_COLS.map((_, i) => `$${i + 2}`).join(', ')}, $${EMISOR_COLS.length + 2}, $${EMISOR_COLS.length + 3}, $${EMISOR_COLS.length + 4})`,
-      [tenantId, ...vals, encryptSecret(e.mh_password), encryptSecret(e.firmador_password), certPathFor(e.mh_nit)]);
+      // Las claves son opcionales: sin ellas la empresa no emite por /v2, pero sí valida los DTE que recibe
+      [tenantId, ...vals, e.mh_password ? encryptSecret(e.mh_password) : null, e.firmador_password ? encryptSecret(e.firmador_password) : null,
+       certPathFor(e.mh_nit)]);
     return 'created';
   }
   await db.query(`
