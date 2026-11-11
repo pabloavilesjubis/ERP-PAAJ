@@ -49,7 +49,7 @@ export function EmisorFields({ e, setE, requirePasswords, showPasswords = true }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
       <Field label="Nombre o razón social"><Input {...f('emisor_nombre')} /></Field>
-      <Field label="NIT (14 dígitos)" error={nitDigits && nitDigits.length !== 14 ? `Tiene ${nitDigits.length} dígitos` : undefined}>
+      <Field label="NIT (14 dígitos, o DUI si eres persona natural)" error={nitDigits && nitDigits.length !== 14 && nitDigits.length !== 9 ? `Tiene ${nitDigits.length} dígitos` : undefined}>
         <Input {...f('mh_nit')} placeholder="0614-010101-101-1" />
       </Field>
       <Field label="NRC"><Input {...f('emisor_nrc')} placeholder="123456-7" /></Field>

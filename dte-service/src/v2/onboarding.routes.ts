@@ -37,7 +37,7 @@ const CompleteBody = z.object({
   }),
   emisor: z.object({
     mh_env: z.enum(['sandbox', 'production']),
-    mh_nit: z.string().regex(/^\d{14}$/),
+    mh_nit: z.string().regex(/^(\d{14}|\d{9})$/),
     mh_password: z.string().min(1),
     firmador_password: z.string().min(1),
     emisor_nrc: z.string().min(1),
@@ -105,7 +105,7 @@ export function registerOnboardingRoutes(app: FastifyInstance): void {
     if (!mhNit || !buffer) {
       throw new ValidationError('mh_nit y cert (file o cert_base64) requeridos');
     }
-    if (!/^\d{14}$/.test(mhNit)) {
+    if (!/^(\d{14}|\d{9})$/.test(mhNit)) {
       throw new ValidationError('mh_nit debe ser 14 dígitos');
     }
     // Solo el super-admin de plataforma puede reemplazar el certificado de un NIT

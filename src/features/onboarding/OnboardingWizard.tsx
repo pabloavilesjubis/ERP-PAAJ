@@ -256,7 +256,7 @@ function Step3MH({ form, update }: StepProps) {
           <option value="production">Producción</option>
         </select>
       </Field>
-      <Field label="NIT (14 dígitos, sin guiones)" required>
+      <Field label="NIT (14 dígitos, o DUI de 9 si es persona natural)" required>
         <input style={inputStyle} value={form.mh_nit} onChange={e => update('mh_nit', e.target.value.replace(/\D/g, '').slice(0, 14))} maxLength={14} />
       </Field>
       <Field label="Password Hacienda (clave API MH)" required>

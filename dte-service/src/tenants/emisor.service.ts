@@ -22,7 +22,8 @@ const code4 = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{4}$/, '4 caracter
 
 export const EmisorInput = z.object({
   mh_env: z.enum(['sandbox', 'production']),
-  mh_nit: z.string().trim().transform(v => v.replace(/\D/g, '')).refine(v => /^\d{14}$/.test(v), 'El NIT debe tener 14 dígitos'),
+  // Persona natural: el NIT puede ser el DUI homologado (9 dígitos), como acepta el esquema del MH
+  mh_nit: z.string().trim().transform(v => v.replace(/\D/g, '')).refine(v => /^(\d{14}|\d{9})$/.test(v), 'El NIT debe tener 14 dígitos (o 9 si es el DUI homologado)'),
   emisor_nrc: z.string().trim().min(1, 'Indica el NRC'),
   emisor_nombre: z.string().trim().min(1, 'Indica el nombre del emisor'),
   emisor_cod_actividad: z.string().trim().min(1, 'Elige la actividad económica'),
@@ -89,7 +90,7 @@ export async function upsertEmisor(tenantId: number, e: EmisorData, db: Db = { q
 
 /** Guarda el certificado .crt del MH para un NIT (lo lee el firmador). */
 export async function saveCert(nit: string, content: Buffer): Promise<string> {
-  if (!/^\d{14}$/.test(nit)) throw new ValidationError('El NIT debe tener 14 dígitos');
+  if (!/^(\d{14}|\d{9})$/.test(nit)) throw new ValidationError('El NIT debe tener 14 dígitos (o 9 si es el DUI homologado)');
   if (content.length < 100 || content.length > 64 * 1024) throw new ValidationError('El archivo no parece un certificado .crt del MH');
   const head = content.subarray(0, 200).toString('utf8');
   if (!/<\?xml|<CertificadoMH|-----BEGIN|^\s*[{<]/.test(head) && content[0] !== 0x30) {

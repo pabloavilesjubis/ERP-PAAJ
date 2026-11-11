@@ -106,7 +106,7 @@ export async function registerCompanyRoutes(app: FastifyInstance): Promise<void>
       const env = b.mh_env ?? em?.mh_env;
       const nit = (b.mh_nit ?? em?.mh_nit ?? '').replace(/\D/g, '');
       const password = b.mh_password || (em?.mh_password_enc ? decryptSecret(em.mh_password_enc) : '');
-      if (!env || !/^\d{14}$/.test(nit) || !password) throw new ValidationError('Indica ambiente, NIT y clave API del MH');
+      if (!env || !/^(\d{14}|\d{9})$/.test(nit) || !password) throw new ValidationError('Indica ambiente, NIT y clave API del MH');
       try {
         await testCredentials(env, nit, password);
         return { ok: true };

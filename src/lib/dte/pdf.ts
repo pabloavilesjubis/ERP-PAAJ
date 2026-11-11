@@ -267,6 +267,7 @@ export function setDtePdfLogo(dataUrl: string | null): void {
 
 const fmtNit = (v?: string | null) => {
   const d = (v ?? '').replace(/\D/g, '');
+  if (d.length === 9) return `${d.slice(0, 8)}-${d.slice(8)}`;   // DUI homologado como NIT
   return d.length === 14 ? `${d.slice(0, 4)}-${d.slice(4, 10)}-${d.slice(10, 13)}-${d.slice(13)}` : (v ?? '');
 };
 const fmtDui = (v?: string | null) => {

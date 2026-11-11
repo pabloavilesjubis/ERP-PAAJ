@@ -57,6 +57,17 @@ describe.skipIf(!hasDb)('Mi empresa (/v2/company)', () => {
     expect(full.correlativos).toContainEqual({ tipo_dte: '01', seeded: true, ultimo_consumido: 120 });
   });
 
+  it('persona natural: NIT de 9 dígitos (DUI homologado) y DUI del titular', async () => {
+    const pn = await createTenant();
+    const res = await app.inject({ method: 'PUT', url: '/v2/company/emisor', headers: auth(pn.token), payload: {
+      ...EMISOR, mh_nit: '01234567-8', emisor_dui: '01234567-8', mh_password: 'a', firmador_password: 'b' } });
+    expect(res.statusCode, res.body).toBe(200);
+    const e = (await app.inject({ method: 'GET', url: '/v2/company', headers: auth(pn.token) })).json().emisor;
+    expect(e).toMatchObject({ mh_nit: '012345678', emisor_dui: '012345678' });
+    const bad = await app.inject({ method: 'PUT', url: '/v2/company/emisor', headers: auth(pn.token), payload: { ...EMISOR, mh_nit: '0123456', emisor_dui: '123' } });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it('el NIT no se puede repetir entre empresas', async () => {
     const other = await createTenant();
     const res = await app.inject({ method: 'PUT', url: '/v2/company/emisor', headers: auth(other.token), payload: { ...EMISOR, mh_password: 'a', firmador_password: 'b' } });
