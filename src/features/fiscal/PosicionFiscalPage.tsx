@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { RouteTabs } from '@/components/ui/Tabs';
+import { KpiCard } from '@/components/ui/KpiCard';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorBanner, Loading } from '@/components/ui/Feedback';
@@ -13,17 +15,41 @@ import { EntryModal } from '@/features/accounting/components/EntryModals';
 import { todayIso } from '@/features/accounting/dates';
 import { dmy, money, MONTHS_ES, num } from '@/features/accounting/format';
 import { fiscalApi, type FiscalMonth, type FiscalSettings } from './api';
+import { ObligacionesPage } from './ObligacionesPage';
 
 const monthName = (iso: string) => `${MONTHS_ES[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
 
+export type FiscalTab = 'iva' | 'obligaciones';
+
+/** Posición fiscal: IVA y pago a cuenta por mes, y las obligaciones patronales (ISSS, AFP, renta). */
+export function PosicionFiscalPage({ tab = 'iva' }: { tab?: FiscalTab }) {
+  return (
+    <div>
+      <SectionHeader title="Posición fiscal" description="IVA (F-07), pago a cuenta y retenciones (F-14) de cada mes, y las obligaciones patronales: ISSS, AFP y renta." />
+      <RouteTabs tabs={[
+        { to: '/fiscal', label: 'IVA y pago a cuenta', end: true },
+        { to: '/fiscal/obligaciones', label: 'Obligaciones patronales' },
+      ]} />
+      {tab === 'iva' ? <IvaPagoCuenta /> : <ObligacionesPage />}
+    </div>
+  );
+}
+
+const shiftMonth = (ym: string, n: number) => {
+  const d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + n, 15);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
 /**
- * Posición fiscal: IVA (F-07) con remanente encadenado y pago a cuenta +
- * retenciones (F-14), mes a mes, con su liquidación y pagos contabilizados.
+ * IVA (F-07) con remanente encadenado y pago a cuenta + retenciones (F-14),
+ * mes a mes, con su liquidación y pagos contabilizados.
  */
-export function PosicionFiscalPage() {
+function IvaPagoCuenta() {
   const { can } = usePermissions();
   const qc = useQueryClient();
   const [to, setTo] = useState(todayIso());
+  const [from, setFrom] = useState(shiftMonth(todayIso().slice(0, 7), -5));
+  const [open, setOpen] = useState<string | null>(null);
   const settings = useQuery({ queryKey: ['fiscal', 'settings'], queryFn: fiscalApi.settings });
   const months = useQuery({ queryKey: ['fiscal', 'months', to], queryFn: () => fiscalApi.months(to), enabled: !!settings.data?.settings });
   const [paying, setPaying] = useState<{ m: FiscalMonth; form: 'F07' | 'F14' } | null>(null);
@@ -36,28 +62,40 @@ export function PosicionFiscalPage() {
     onSuccess: refresh,
   });
   const manage = can('fiscal:manage');
+  const visible = (months.data?.items ?? []).filter(m => m.period.slice(0, 7) >= from);
+  const sum = (k: keyof FiscalMonth) => visible.reduce((t, m) => t + (Number(m[k]) || 0), 0);
 
   return (
     <div>
-      <SectionHeader title="Posición fiscal" description="IVA (F-07) y pago a cuenta + retenciones (F-14) por mes, calculados desde ventas, compras y planillas." />
       <SettingsCard current={settings.data?.settings ?? null} editable={manage} />
       {!settings.data?.settings ? (settings.isLoading ? <Loading /> : null) : <>
         <div className="toolbar" style={{ marginTop: 'var(--s-5)' }}>
+          <Field label="Desde"><Input type="month" value={from} max={to.slice(0, 7)} onChange={e => e.target.value && setFrom(e.target.value)} /></Field>
           <Field label="Hasta"><Input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
         </div>
         <ErrorBanner error={months.error ?? liquidate.error ?? (undo.error instanceof Error && undo.error.message === 'cancelado' ? null : undo.error)} />
-        {months.isLoading ? <Loading /> : !(months.data?.items ?? []).length ? <EmptyState title="Sin meses en el rango" /> : (
+        {months.isLoading ? <Loading /> : !visible.length ? <EmptyState title="Sin meses en el rango" /> : (<>
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 'var(--s-5)' }}>
+            <KpiCard size="md" label="Ventas netas" value={money(sum('ventas_netas'))} hint="sin IVA" />
+            <KpiCard size="md" label="IVA débito fiscal" value={money(sum('debito'))} />
+            <KpiCard size="md" label="Crédito fiscal" value={money(sum('credito'))} hint={`percepción ${money(sum('percepcion'))}`} />
+            <KpiCard size="md" label="IVA a pagar (F-07)" value={money(sum('f07'))} />
+            <KpiCard size="md" label="Pago a cuenta + retenciones (F-14)" value={money(sum('f14'))} />
+            <KpiCard size="md" tone={sum('pendiente') > 0.004 ? 'danger' : 'success'} label="Pendiente de pago" value={money(sum('pendiente'))} hint="F-07 + F-14" />
+          </div>
           <div className="table-wrap"><div className="table-scroll">
             <table className="acc-table">
               <thead><tr>
-                <th>Mes</th><th className="num">Débito</th><th className="num">Crédito</th><th className="num">Percep./ret.</th><th className="num">Remanente ant.</th>
+                <th /><th>Mes</th><th className="num">Débito</th><th className="num">Crédito</th><th className="num">Percep./ret.</th><th className="num">Remanente ant.</th>
                 <th className="num">IVA a pagar</th><th className="num">F-07</th><th className="num">Pago a cuenta</th><th className="num">Renta ret.</th><th className="num">F-14</th><th>Estado</th><th />
               </tr></thead>
-              <tbody>{months.data!.items.map(m => {
+              <tbody>{visible.map(m => {
                 const ret = m.isr_planilla + m.isr_compras;
                 return (
-                  <tr key={m.period}>
-                    <td>{monthName(m.period)}<div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{m.ventas_docs} ventas · {m.compras_docs} compras</div></td>
+                  <Fragment key={m.period}>
+                  <tr style={{ cursor: 'pointer' }} onClick={() => setOpen(open === m.period ? null : m.period)}>
+                    <td className="muted" aria-label={open === m.period ? 'Ocultar detalle' : 'Ver detalle'}>{open === m.period ? '▾' : '▸'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{monthName(m.period)}<div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{m.ventas_docs} ventas · {m.compras_docs} compras</div></td>
                     <td className="num">{money(m.debito)}</td>
                     <td className="num">{money(m.credito)}</td>
                     <td className="num">{money(m.percepcion + m.ret_iva_clientes, { blankZero: true })}</td>
@@ -71,7 +109,7 @@ export function PosicionFiscalPage() {
                       {m.liquidation_entry_id ? <Badge tone="info">IVA liquidado</Badge> : null}{' '}
                       {m.pendiente <= 0.004 ? <Badge tone="success">Pagado</Badge> : <Badge tone="warning">Pendiente {money(m.pendiente)}</Badge>}
                     </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                       {m.liquidation_entry_id
                         ? <><Button size="sm" variant="secondary" onClick={() => setEntry(m.liquidation_entry_id!)}>Asiento</Button>{' '}
                             {manage && <Button size="sm" variant="secondary" onClick={() => undo.mutate(m.period)}>Deshacer</Button>}</>
@@ -80,11 +118,17 @@ export function PosicionFiscalPage() {
                       {manage && m.f14 - m.pagado_f14 > 0.004 && <Button size="sm" onClick={() => setPaying({ m, form: 'F14' })}>Pagar F-14</Button>}
                     </td>
                   </tr>
+                  {open === m.period && <tr><td /><td colSpan={12}><MonthDetail m={m} /></td></tr>}
+                  </Fragment>
                 );
               })}</tbody>
             </table>
           </div></div>
-        )}
+          <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--s-3)' }}>
+            IVA del mes = débito − crédito − percepciones − retenciones de clientes − remanente anterior; si sale negativo pasa como remanente al mes siguiente.
+            Las retenciones de IVA que hicimos se pagan en el F-07. F-14 = pago a cuenta + renta retenida en planillas, liquidaciones y compras.
+          </p>
+        </>)}
         {(months.data?.payments ?? []).length > 0 && <>
           <div className="section-title" style={{ margin: 'var(--s-6) 0 var(--s-3)' }}>Pagos registrados</div>
           <div className="table-wrap"><table className="acc-table">
@@ -173,5 +217,45 @@ function VoidPayment({ id, onClose }: { id: number; onClose: () => void }) {
       <ErrorBanner error={run.error} />
       <Field label="Motivo"><Input value={reason} onChange={e => setReason(e.target.value)} autoFocus /></Field>
     </Modal>
+  );
+}
+
+function MonthDetail({ m }: { m: FiscalMonth }) {
+  const row = (label: string, value: number, strong = false) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontWeight: strong ? 700 : 400 }}><span>{label}</span><span className="num">{money(value)}</span></div>
+  );
+  const head = (t: string) => <div className="muted" style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>{t}</div>;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 24, padding: '8px 0', fontSize: 'var(--text-sm)' }}>
+      <div>
+        {head('Ventas')}
+        {row('Ventas netas (sin IVA)', m.ventas_netas)}
+        {row('Base del pago a cuenta', m.base_pago_cuenta)}
+        {row('Retenciones de IVA de clientes', m.ret_iva_clientes)}
+        {row('Renta que nos retuvieron', m.ret_renta_clientes)}
+        {row('Débito fiscal', m.debito, true)}
+        <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{m.ventas_docs} documento(s)</div>
+      </div>
+      <div>
+        {head('Compras (libro de compras)')}
+        {row('Percepción IVA 1 % (a favor)', m.percepcion)}
+        {row('Retenciones de IVA que hicimos', m.ret_iva_hechas)}
+        {row('Renta retenida en compras', m.isr_compras)}
+        {row('Crédito fiscal', m.credito, true)}
+        <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{m.compras_docs} documento(s)</div>
+      </div>
+      <div>
+        {head('Liquidación')}
+        {row('Remanente del mes anterior', m.remanente_anterior)}
+        {row('Impuesto del mes (neto)', m.iva_neto)}
+        {row('F-07 a pagar', m.f07, true)}
+        {row('Remanente para el mes siguiente', m.remanente_siguiente)}
+        {row('Pago a cuenta', m.pago_a_cuenta)}
+        {row('Renta retenida en planilla', m.isr_planilla)}
+        {row('Renta retenida en compras', m.isr_compras)}
+        {row('F-14 a pagar', m.f14, true)}
+        {row('Pagado F-07 / F-14', m.pagado_f07 + m.pagado_f14)}
+      </div>
+    </div>
   );
 }

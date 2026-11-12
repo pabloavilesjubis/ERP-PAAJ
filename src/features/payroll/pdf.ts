@@ -107,3 +107,79 @@ export function terminationPdf(c: Company, d: TerminationCalc, number?: number):
   doc.text('Empleado', 60, y + 4, { align: 'center' }); doc.text('Empleador', 155, y + 4, { align: 'center' });
   return doc;
 }
+
+/**
+ * Planilla completa (hoja carta horizontal): una fila por empleado con días,
+ * devengado, descuentos de ley, líquido y aportes patronales, más los totales.
+ * Es el respaldo firmado de la planilla que se archiva y se presenta al MTPS.
+ */
+export function payrollSummaryPdf(c: Company, p: Payroll, lines: PayrollLine[]): jsPDF {
+  const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'landscape' });
+  const W = 279.4;
+  const aguinaldo = p.kind === 'aguinaldo';
+  const period = aguinaldo ? `Aguinaldo ${p.period_end.slice(0, 4)}` : `Planilla ${p.frequency} del ${dmy(p.period_start)} al ${dmy(p.period_end)}`;
+  const number = p.payroll_number ? `PL-${String(p.payroll_number).padStart(5, '0')}` : 'BORRADOR';
+  const cols: Array<{ h: string; w: number; v: (l: PayrollLine) => string; t?: number }> = [
+    { h: 'Empleado', w: 46, v: l => l.employee_name },
+    { h: 'DUI', w: 19, v: l => l.dui ?? '—' },
+    { h: aguinaldo ? 'Días agui.' : 'Días', w: 13, v: l => String(aguinaldo ? l.aguinaldo_days : l.days_paid) },
+    { h: aguinaldo ? 'Aguinaldo' : 'Salario', w: 18, v: l => money(aguinaldo ? l.aguinaldo : l.base_salary) },
+    { h: 'Extras', w: 15, v: l => money(l.overtime_pay + l.holiday_pay) },
+    { h: 'Otros ingr.', w: 16, v: l => money(l.vacation_pay + l.bonuses) },
+    { h: 'Devengado', w: 19, v: l => money(l.gross) },
+    { h: 'ISSS', w: 14, v: l => money(l.isss_employee) },
+    { h: 'AFP', w: 14, v: l => money(l.afp_employee) },
+    { h: 'Renta', w: 15, v: l => money(l.isr) },
+    { h: 'Otros desc.', w: 16, v: l => money(l.other_deductions) },
+    { h: 'Líquido', w: 19, v: l => money(l.net) },
+    { h: 'ISSS pat.', w: 15, v: l => money(l.isss_employer + l.insaforp) },
+    { h: 'AFP pat.', w: 15, v: l => money(l.afp_employer) },
+  ];
+  const x0 = 12;
+  const drawHead = (y: number) => {
+    doc.setFillColor(31, 41, 55); doc.rect(x0, y - 4, W - 24, 6, 'F');
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+    let x = x0 + 1;
+    cols.forEach((col, i) => { doc.text(col.h, i < 2 ? x : x + col.w - 2, y, { align: i < 2 ? 'left' : 'right' }); x += col.w; });
+    doc.setTextColor(0);
+    return y + 6;
+  };
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(c.name, x0, 14);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  if (c.nit) doc.text(`NIT ${c.nit}`, x0, 18);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(aguinaldo ? 'PLANILLA DE AGUINALDO' : 'PLANILLA DE SUELDOS', W - 12, 14, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.text(`${period} · ${number} · Pago ${dmy(p.payment_date)}`, W - 12, 18, { align: 'right' });
+  let y = drawHead(28);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.2);
+  for (const l of lines) {
+    if (y > 190) { doc.addPage(); y = drawHead(16); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.2); }
+    let x = x0 + 1;
+    cols.forEach((col, i) => {
+      const txt = i === 0 ? doc.splitTextToSize(col.v(l), col.w - 2)[0] as string : col.v(l);
+      doc.text(txt, i < 2 ? x : x + col.w - 2, y, { align: i < 2 ? 'left' : 'right' });
+      x += col.w;
+    });
+    doc.setDrawColor(230); doc.line(x0, y + 1.5, W - 12, y + 1.5); doc.setDrawColor(0);
+    y += 5;
+  }
+  const sum = (f: (l: PayrollLine) => number) => lines.reduce((s, l) => s + f(l), 0);
+  const totals = [
+    sum(l => (aguinaldo ? l.aguinaldo : l.base_salary)), sum(l => l.overtime_pay + l.holiday_pay), sum(l => l.vacation_pay + l.bonuses),
+    p.gross, p.isss_employee, p.afp_employee, p.isr, p.other_deductions, p.net, p.isss_employer + p.insaforp, p.afp_employer,
+  ];
+  doc.setFont('helvetica', 'bold'); doc.line(x0, y - 2.5, W - 12, y - 2.5);
+  doc.text(`TOTAL · ${lines.length} empleado(s)`, x0 + 1, y + 1);
+  let x = x0 + 1 + cols.slice(0, 3).reduce((s, col) => s + col.w, 0);
+  cols.slice(3).forEach((col, i) => { doc.text(money(totals[i]!), x + col.w - 2, y + 1, { align: 'right' }); x += col.w; });
+  y += 9;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.text(`Aportes patronales: ISSS ${money(p.isss_employer)} · AFP ${money(p.afp_employer)}${p.insaforp ? ` · INSAFORP ${money(p.insaforp)}` : ''} · `
+    + `Costo total de la planilla ${money(p.gross + p.isss_employer + p.afp_employer + p.insaforp)}`, x0, y);
+  if (p.status === 'anulada') { doc.setTextColor(185, 28, 28); doc.setFont('helvetica', 'bold'); doc.text(`ANULADA · ${p.void_reason ?? ''}`, x0, y + 5); doc.setTextColor(0); }
+  y = Math.min(y + 24, 200);
+  doc.setFont('helvetica', 'normal');
+  doc.line(30, y, 100, y); doc.line(180, y, 250, y);
+  doc.text('Elaboró', 65, y + 4, { align: 'center' }); doc.text('Autorizó', 215, y + 4, { align: 'center' });
+  return doc;
+}

@@ -5,6 +5,8 @@ export interface PayrollSettings {
   afp_employee_rate: number; afp_employer_rate: number; afp_cap: number | null;
   insaforp_applies: boolean; insaforp_rate: number; minimum_wage: number; aguinaldo_exempt: number;
   workday_hours: number; overtime_surcharge: number; night_surcharge: number; holiday_surcharge: number; vacation_premium: number;
+  /** Renta retenida a honorarios: domiciliados (Art. 156 LISR) y no domiciliados (Art. 158) */
+  fee_withholding_rate: number; fee_nonresident_rate: number;
 }
 export interface IsrBracket { frequency: 'mensual' | 'quincenal'; tramo: number; lower_limit: number; rate: number; excess_over: number; fixed_fee: number }
 export interface CostCenter {
@@ -87,6 +89,7 @@ export const payrollApi = {
   terminations: () => api.get<{ items: Termination[] }>('/v2/payroll/terminations').then(r => r.items),
   payTermination: (id: number, payment_date: string, fund_account_id: number) => api.post<{ entry_id: number }>(`/v2/payroll/terminations/${id}/pay`, { payment_date, fund_account_id }),
   voidTermination: (id: number, reason: string) => api.post<{ success: boolean }>(`/v2/payroll/terminations/${id}/void`, { reason }),
+  payslips: (employeeId: number) => api.get<{ items: Array<PayrollLine & { payroll: Payroll }> }>(`/v2/payroll/employees/${employeeId}/payslips`).then(r => r.items),
   f910: (year: number) => api.get<{ year: number; items: Array<{ employee_id: number; full_name: string; dui: string | null; nit: string | null; taxable_income: number; aguinaldo_and_other: number; isss: number; afp: number; isr: number }> }>(`/v2/payroll/reports/f910?year=${year}`),
 };
 

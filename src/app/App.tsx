@@ -97,6 +97,7 @@ export function App() {
         <Route path="planillas/reportes" element={<PlanillasPage tab="reportes" />} />
         <Route path="planillas/configuracion" element={<PlanillasPage tab="configuracion" />} />
         <Route path="fiscal" element={<PosicionFiscalPage />} />
+        <Route path="fiscal/obligaciones" element={<PosicionFiscalPage tab="obligaciones" />} />
         <Route path="dtes-recibidos" element={<RecibidosPage />} />
         <Route path="importaciones" element={<ImportacionesPage />} />
         <Route path="activos" element={<ActivosPage />} />

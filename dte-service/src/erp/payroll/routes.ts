@@ -39,6 +39,7 @@ const SettingsBody = z.object({
   insaforp_applies: z.boolean(), insaforp_rate: z.number().min(0).max(1), minimum_wage: z.number().positive(),
   aguinaldo_exempt: z.number().min(0), workday_hours: z.number().positive(), overtime_surcharge: z.number().min(0),
   night_surcharge: z.number().min(0), holiday_surcharge: z.number().min(0), vacation_premium: z.number().min(0),
+  fee_withholding_rate: z.number().min(0).max(1).optional(), fee_nonresident_rate: z.number().min(0).max(1).optional(),
 });
 
 const TerminationBody = z.object({
@@ -76,7 +77,7 @@ export async function registerPayrollRoutes(app: FastifyInstance): Promise<void>
     r.put('/v2/payroll/settings', { preHandler: requirePerm('payroll:manage') }, async (req) => {
       const c = ctx(req);
       const b = parse(SettingsBody, req.body);
-      const keys = Object.keys(b) as Array<keyof typeof b>;
+      const keys = (Object.keys(b) as Array<keyof typeof b>).filter(k => b[k] !== undefined);
       await tx(async (db) => {
         await q('SELECT payroll.ensure_settings($1)', [c.tenantId], db);
         await q(`UPDATE payroll.settings SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = NOW(), updated_by = $${keys.length + 2}
@@ -181,6 +182,19 @@ export async function registerPayrollRoutes(app: FastifyInstance): Promise<void>
     r.put('/v2/payroll/employees/:id', { preHandler: requirePerm('payroll:manage') }, async (req) => {
       const { tenantId } = ctx(req);
       return { id: await saveEmployee(tenantId, parse(EmployeeBody, req.body), idParam(req)) };
+    });
+
+    // Boletas de un empleado: sus líneas de planillas emitidas, con la planilla
+    r.get('/v2/payroll/employees/:id/payslips', { preHandler: requirePerm('payroll:view') }, async (req) => {
+      const { tenantId } = ctx(req);
+      const res = await q(`
+        SELECT l.*, cc.name AS cost_center_name, to_jsonb(p.*) AS payroll
+          FROM payroll.payroll_lines l
+          JOIN payroll.payrolls p ON p.id = l.payroll_id
+          JOIN payroll.cost_centers cc ON cc.id = l.cost_center_id
+         WHERE l.employee_id = $1 AND p.tenant_id = $2 AND p.status = 'emitida'
+         ORDER BY p.period_end DESC, p.id DESC LIMIT 120`, [idParam(req), tenantId]);
+      return { items: res.rows };
     });
 
     // ── Planillas ────────────────────────────────────────────────────────────

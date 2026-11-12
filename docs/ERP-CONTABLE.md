@@ -166,8 +166,10 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
   (faltas, horas extra, asuetos, vacación, bonos, descuentos) → emitir
   (asiento) → registrar pago (asiento contra el banco, conciliable) → anular.
 - Liquidaciones con vista previa, finiquito PDF, pago y anulación.
-- Boletas de pago en PDF (2 por página), resumen ISSS/AFP (CSV) y base del
-  F-910 anual por empleado.
+- Boletas de pago en PDF (2 por página, toda la planilla o la de un empleado),
+  historial de boletas por empleado (botón «Boletas» en Empleados), planilla
+  completa en PDF horizontal para firma y archivo, resumen ISSS/AFP (CSV) y base
+  del F-910 anual por empleado.
 - Pendiente: archivos de carga oficiales OVISSS/SEPP (el CSV actual es un
   resumen con los datos que piden; validar formato oficial).
 
@@ -180,6 +182,20 @@ saldos iniciales (CSV codigo,debe,haber → partida de apertura en borrador).
   compras). "Liquidar IVA" registra el asiento que salda débito/crédito contra
   IVA por pagar (o deja remanente); los pagos F-07/F-14 salen del banco. La
   disponibilidad bancaria descuenta los impuestos pendientes.
+- **Obligaciones patronales** (`/fiscal/obligaciones`, migración 021, portado
+  de ChuchoWash 0068): por mes, ISSS (+ INSAFORP), AFP por administradora y
+  renta de empleados — **real** desde las planillas emitidas (por fin de período)
+  y liquidaciones, o **estimado** con el salario de los activos (renta fija) más
+  la renta variable que se escribe por empleado —, renta retenida a honorarios
+  (libro de compras + estimados: 10 % domiciliados Art. 156, 20 % no domiciliados
+  Art. 158; tasas en Planillas → Configuración) y la consolidación por pagador
+  (Hacienda F-07/F-14, ISSS, cada AFP) con lo pagado y el vencimiento aprox.
+  (10.º día hábil del mes siguiente, sin asuetos). Lo escrito se guarda por mes
+  (`accounting.obligation_estimates`). Pagos: Hacienda → `fiscal_payments`;
+  ISSS/AFP → `accounting.obligation_payments` con asiento Debe ISSS/AFP por
+  pagar / Haber banco, anulables. «Imprimir flujo» arma la hoja carta de egresos
+  (con las planillas del mes o del siguiente que se elijan). El detalle por
+  empleado solo se muestra con `payroll:view`.
 - **DTEs recibidos** (`/dtes-recibidos`): subir JSON (varios a la vez) o
   conectar el buzón IMAP de la empresa (solo lectura, contraseña cifrada,
   revisión cada 30 min). Reglas de ChuchoWash: sin duplicados (código o sello,

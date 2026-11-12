@@ -19,7 +19,7 @@ import { downloadText } from '@/features/accounting/catalogCsv';
 import { monthRange, todayIso } from '@/features/accounting/dates';
 import { dmy, entryNo, money, num } from '@/features/accounting/format';
 import { KIND_LABEL, payrollApi, type Employee, type EmployeeInput, type PayrollLine, type PayrollSettings, type TerminationCalc, type TerminationInput } from './api';
-import { payslipsPdf, terminationPdf } from './pdf';
+import { payrollSummaryPdf, payslipsPdf, terminationPdf } from './pdf';
 
 export type PayrollTab = 'empleados' | 'planillas' | 'liquidaciones' | 'reportes' | 'configuracion';
 
@@ -49,7 +49,7 @@ export function PlanillasPage({ tab }: { tab: PayrollTab }) {
 
 function useCompany() {
   const b = useBranding();
-  return { name: b.productName };
+  return { name: b.legalName || b.productName };
 }
 
 // ── Empleados ────────────────────────────────────────────────────────────────
@@ -57,14 +57,18 @@ function Empleados() {
   const { can } = usePermissions();
   const [status, setStatus] = useState('activo');
   const [editing, setEditing] = useState<Employee | 'new' | null>(null);
+  const [slipsOf, setSlipsOf] = useState<Employee | null>(null);
+  const [search, setSearch] = useState('');
   const q = useQuery({ queryKey: ['payroll', 'employees', status], queryFn: () => payrollApi.employees(status || undefined) });
-  const items = q.data ?? [];
+  const term = search.trim().toLowerCase();
+  const items = (q.data ?? []).filter(e => !term || [e.full_name, e.dui, e.position, e.employee_code, e.cost_center_name].some(v => v?.toLowerCase().includes(term)));
   return (
     <>
       <div className="toolbar">
         <Select value={status} onChange={e => setStatus(e.target.value)} style={{ width: 180 }}>
           <option value="activo">Activos</option><option value="retirado">Retirados</option><option value="">Todos</option>
         </Select>
+        <Input placeholder="Buscar por nombre, DUI o cargo" value={search} onChange={e => setSearch(e.target.value)} aria-label="Buscar empleado" style={{ width: 260 }} />
         {can('payroll:manage') && <Button onClick={() => setEditing('new')}>+ Empleado</Button>}
         <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>
           {items.length} empleado(s) · planilla mensual {money(items.filter(e => e.status === 'activo').reduce((s, e) => s + num(e.monthly_salary), 0))}
@@ -80,13 +84,17 @@ function Empleados() {
                 <td>{e.full_name}</td><td className="code">{e.dui}</td><td>{e.position}</td><td>{e.cost_center_name}</td>
                 <td className="code">{dmy(e.hire_date)}</td><td>{e.pay_frequency}</td><td className="num">{money(e.monthly_salary)}</td>
                 <td>{e.status === 'activo' ? <Badge tone="success">Activo</Badge> : <Badge>Retirado {dmy(e.termination_date)}</Badge>}</td>
-                <td style={{ textAlign: 'right' }}>{can('payroll:manage') && <Button size="sm" variant="secondary" onClick={() => setEditing(e)}>Editar</Button>}</td>
+                <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <Button size="sm" variant="secondary" onClick={() => setSlipsOf(e)}>Boletas</Button>{' '}
+                  {can('payroll:manage') && <Button size="sm" variant="secondary" onClick={() => setEditing(e)}>Editar</Button>}
+                </td>
               </tr>
             ))}</tbody>
           </table>
         </div></div>
       )}
       {editing && <EmployeeModal employee={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {slipsOf && <EmployeePayslipsModal employee={slipsOf} onClose={() => setSlipsOf(null)} />}
     </>
   );
 }
@@ -268,6 +276,7 @@ function PayrollDetail({ id }: { id: number }) {
           {draft && <Button variant="danger" onClick={() => del.mutate()}>Eliminar borrador</Button>}
           {draft && <Button onClick={() => emit.mutate()} disabled={emit.isPending}>Emitir y contabilizar</Button>}
           {p.status === 'emitida' && <Button variant="secondary" onClick={() => payslipsPdf(company, p, lines).save(`boletas-PL-${p.payroll_number}.pdf`)}>Boletas PDF</Button>}
+          <Button variant="secondary" onClick={() => payrollSummaryPdf(company, p, lines).save(`planilla-${p.payroll_number ? `PL-${p.payroll_number}` : 'borrador'}.pdf`)}>Planilla PDF</Button>
           <Button variant="secondary" onClick={isssAfpCsv}>Resumen ISSS/AFP</Button>
           {p.status === 'emitida' && !p.paid_entry_id && can('payroll:manage') && <Button onClick={() => setPaying(true)}>Registrar pago</Button>}
           {p.status === 'emitida' && can('payroll:manage') && <Button variant="danger" onClick={() => setVoiding(true)}>Anular</Button>}
@@ -287,10 +296,11 @@ function PayrollDetail({ id }: { id: number }) {
         <table className="acc-table lines-editor">
           <thead><tr>
             <th>Empleado</th>{ord && <><th className="num">Días</th><th className="num">Faltas</th><th className="num">HE día</th><th className="num">HE noche</th><th className="num">Asuetos</th><th>Vac.</th></>}
-            <th className="num">Bonos</th><th className="num">Devengado</th><th className="num">ISSS</th><th className="num">AFP</th><th className="num">Renta</th><th className="num">Otros desc.</th><th className="num">Líquido</th>{draft && <th />}
+            <th className="num">Bonos</th><th className="num">Devengado</th><th className="num">ISSS</th><th className="num">AFP</th><th className="num">Renta</th><th className="num">Otros desc.</th><th className="num">Líquido</th>{(draft || p.status === 'emitida') && <th />}
           </tr></thead>
           <tbody>{lines.map(l => <LineRow key={l.id} line={l} ord={ord} draft={draft}
-            onChange={patch => updLine.mutate({ id: l.id, patch })} onRemove={() => rmLine.mutate(l.id)} />)}</tbody>
+            onChange={patch => updLine.mutate({ id: l.id, patch })} onRemove={() => rmLine.mutate(l.id)}
+            onSlip={p.status === 'emitida' ? () => payslipsPdf(company, p, [l]).save(`boleta-PL-${p.payroll_number}-${l.employee_name.replace(/\s+/g, '_')}.pdf`) : undefined} />)}</tbody>
         </table>
       </div></div>
       {entry !== null && <EntryModal id={entry} onClose={() => setEntry(null)} />}
@@ -308,7 +318,7 @@ function NumCell({ value, onCommit, disabled }: { value: number; onCommit: (v: n
     onChange={e => setV(e.target.value)} onBlur={() => { if (num(v) !== num(value)) onCommit(num(v)); }} /></td>;
 }
 
-function LineRow({ line: l, ord, draft, onChange, onRemove }: { line: PayrollLine; ord: boolean; draft: boolean; onChange: (p: Parameters<typeof payrollApi.updateLine>[1]) => void; onRemove: () => void }) {
+function LineRow({ line: l, ord, draft, onChange, onRemove, onSlip }: { line: PayrollLine; ord: boolean; draft: boolean; onChange: (p: Parameters<typeof payrollApi.updateLine>[1]) => void; onRemove: () => void; onSlip?: () => void }) {
   return (
     <tr>
       <td><div>{l.employee_name}</div><div className="muted" style={{ fontSize: 'var(--text-xs)' }}>{l.position} · {l.cost_center_name} · {money(l.monthly_salary)}</div></td>
@@ -328,6 +338,7 @@ function LineRow({ line: l, ord, draft, onChange, onRemove }: { line: PayrollLin
       <NumCell value={l.other_deductions} disabled={!draft} onCommit={v => onChange({ other_deductions: v })} />
       <td className="num"><strong>{money(l.net)}</strong></td>
       {draft && <td><button type="button" className="btn-icon" title="Quitar de esta planilla" onClick={onRemove}>×</button></td>}
+      {onSlip && <td><Button size="sm" variant="secondary" onClick={onSlip} title="Boleta de pago de este empleado">Boleta</Button></td>}
     </tr>
   );
 }
@@ -497,6 +508,7 @@ const SETTING_FIELDS: Array<[keyof PayrollSettings, string, 'pct' | 'money' | 'n
   ['insaforp_rate', 'INSAFORP', 'pct'], ['minimum_wage', 'Salario mínimo mensual', 'money'], ['aguinaldo_exempt', 'Aguinaldo exento de renta', 'money'],
   ['workday_hours', 'Horas de la jornada', 'num'], ['overtime_surcharge', 'Recargo horas extra', 'pct'], ['night_surcharge', 'Recargo nocturno', 'pct'],
   ['holiday_surcharge', 'Recargo asueto trabajado', 'pct'], ['vacation_premium', 'Prima de vacaciones', 'pct'],
+  ['fee_withholding_rate', 'Retención honorarios domiciliados (Art. 156)', 'pct'], ['fee_nonresident_rate', 'Retención no domiciliados (Art. 158)', 'pct'],
 ];
 
 function Configuracion() {
@@ -618,6 +630,33 @@ function CostCenterModal({ cc, onClose }: { cc: { id: number; name: string; sala
       <label style={{ fontSize: 'var(--text-sm)', display: 'flex', gap: 6, alignItems: 'center' }}>
         <input type="checkbox" checked={f.is_active} onChange={e => setF({ ...f, is_active: e.target.checked })} /> Activo
       </label>
+    </Modal>
+  );
+}
+
+/** Boletas de un empleado: sus planillas emitidas, cada una descargable. */
+function EmployeePayslipsModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
+  const company = useCompany();
+  const q = useQuery({ queryKey: ['payroll', 'payslips', employee.id], queryFn: () => payrollApi.payslips(employee.id) });
+  return (
+    <Modal title={`Boletas de ${employee.full_name}`} onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>Cerrar</Button>}>
+      <ErrorBanner error={q.error} />
+      {q.isLoading ? <Loading /> : !(q.data ?? []).length ? <EmptyState title="Sin planillas emitidas" description="Las boletas aparecen cuando se emite una planilla con este empleado." /> : (
+        <div className="table-wrap"><table className="acc-table">
+          <thead><tr><th>Planilla</th><th>Pago</th><th className="num">Devengado</th><th className="num">Líquido</th><th /></tr></thead>
+          <tbody>{q.data!.map(r => (
+            <tr key={r.id}>
+              <td>{r.payroll.kind === 'aguinaldo' ? `Aguinaldo ${r.payroll.period_end.slice(0, 4)}` : `${dmy(r.payroll.period_start)} – ${dmy(r.payroll.period_end)}`}
+                <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>PL-{String(r.payroll.payroll_number ?? 0).padStart(5, '0')}</div></td>
+              <td className="code">{dmy(r.payroll.payment_date)}</td>
+              <td className="num">{money(r.gross)}</td><td className="num"><strong>{money(r.net)}</strong></td>
+              <td style={{ textAlign: 'right' }}>
+                <Button size="sm" variant="secondary" onClick={() => payslipsPdf(company, r.payroll, [r]).save(`boleta-PL-${r.payroll.payroll_number}-${employee.full_name.replace(/\s+/g, '_')}.pdf`)}>Boleta PDF</Button>
+              </td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
     </Modal>
   );
 }
