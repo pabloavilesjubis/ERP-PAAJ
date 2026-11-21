@@ -4,6 +4,7 @@ import type pg from 'pg';
 import { decryptSecret } from '../../auth/crypto.js';
 import { q, tx, type Ctx } from '../http.js';
 import { parseDteJson, type ParsedDte } from './dteParser.js';
+import { extractPdfText, parseStatement, statementBelongsTo, type ParsedStatement } from './statementParser.js';
 
 /**
  * Buzón de DTEs recibidos (portado de ChuchoWash api/_lib/mail/*): cada
@@ -18,6 +19,7 @@ export const MAX_DTE_JSON_BYTES = 512 * 1024;
 const LOOKBACK_DAYS = 30;
 const MAX_AUTO_ATTEMPTS = 10;
 const BUDGET_MS = 120_000;
+const MAX_STATEMENT_BYTES = 8 * 1024 * 1024;
 
 export interface IngestResult { id: number; status: 'registrado' | 'duplicado' | 'rechazado'; detail: string | null; compra_id: number | null }
 
@@ -53,6 +55,79 @@ export async function ingestText(c: Ctx, text: string, source: 'upload' | 'email
   const res = await tx(db => q<{ r: IngestResult }>('SELECT accounting.ingest_received_dte($1, $2::jsonb, $3::jsonb, $4, $5::jsonb) AS r',
     [c.tenantId, JSON.stringify(docForSql(d)), JSON.stringify(d.raw), source, JSON.stringify(meta)], db), c);
   return { ok: true, result: res.rows[0]!.r, warnings: d.warnings, code: d.generationCode, control: d.controlNumber || null };
+}
+
+/**
+ * Estado de cuenta en PDF (tarjeta o préstamo) → intereses del corte como gasto
+ * financiero. `preview` solo lee y valida, no registra. Si el PDF no es un
+ * estado de cuenta devuelve notStatement (el buzón lo ignora).
+ */
+export async function ingestStatementPdf(c: Ctx, bytes: Buffer, source: 'upload' | 'email', meta: { file_name?: string | null; mail_from?: string | null; mail_subject?: string | null }, preview = false):
+  Promise<{ ok: true; statement: ParsedStatement; belongs: boolean; result: IngestResult | null } | { ok: false; notStatement: boolean; error: string }> {
+  if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') return { ok: false, notStatement: true, error: 'El archivo no es un PDF' };
+  let text: string;
+  try { text = await extractPdfText(bytes); }
+  catch (e) { return { ok: false, notStatement: false, error: e instanceof Error ? e.message : 'No se pudo leer el PDF' }; }
+  const st = parseStatement(text);
+  if (!st) return { ok: false, notStatement: true, error: 'No parece un estado de cuenta (no tiene fecha de corte)' };
+  const who = (await q<{ emisor_nombre: string | null; emisor_dui: string | null; nombre_legal: string | null }>(
+    `SELECT e.emisor_nombre, e.emisor_dui, t.nombre_legal FROM public.tenants t
+       LEFT JOIN public.tenant_emisor e ON e.tenant_id = t.id WHERE t.id = $1`, [c.tenantId])).rows[0];
+  const belongs = statementBelongsTo(text, [who?.emisor_nombre, who?.nombre_legal], who?.emisor_dui);
+  if (preview) return { ok: true, statement: st, belongs, result: null };
+  const doc = {
+    number: st.number, bank_name: st.bankName, bank_nit: st.bankNit, account: st.account, cut_date: st.cutDate,
+    interest_total: st.interestTotal, lines: st.lines, other_lines: st.otherLines,
+    reject_reason: belongs ? null : 'El titular del estado de cuenta no es esta empresa (nombre o DUI de Mi empresa)',
+  };
+  const res = await tx(db => q<{ r: IngestResult }>('SELECT accounting.ingest_financial_statement($1, $2::jsonb, $3, $4::jsonb) AS r',
+    [c.tenantId, JSON.stringify(doc), source, JSON.stringify(meta)], db), c);
+  const result = res.rows[0]!.r;
+  if (result.status === 'registrado' && result.compra_id) {
+    await q(`INSERT INTO public.compra_adjuntos (tenant_id, compra_id, kind, filename, mime, size, content, uploaded_by)
+             VALUES ($1, $2, 'pdf', $3, 'application/pdf', $4, $5, $6) ON CONFLICT (compra_id, kind) DO NOTHING`,
+      [c.tenantId, result.compra_id, meta.file_name || 'estado-de-cuenta.pdf', bytes.length, bytes, source === 'email' ? 'Buzón DTE' : c.userName]);
+  }
+  return { ok: true, statement: st, belongs, result };
+}
+
+async function downloadPart(client: ImapFlow, uid: number, part: string, max: number): Promise<Buffer | null> {
+  const dl = await client.download(String(uid), part, { uid: true, maxBytes: max + 1 });
+  if (!dl.content) return null;
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of dl.content) {
+    const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    size += b.length; chunks.push(b);
+    if (size > max) return null;
+  }
+  return Buffer.concat(chunks);
+}
+
+/** Correo sin DTE: sus PDFs pueden ser estados de cuenta con intereses. Devuelve cuántos se leyeron como estado de cuenta. */
+async function scanStatements(c: Ctx, client: ImapFlow, uid: number, pdfs: Attachment[], header: { mail_from: string | null; mail_subject: string | null },
+  sum: RunSummary, notes: string[], secrets: string[]): Promise<number> {
+  let found = 0;
+  for (const pdf of pdfs.slice(0, 4)) {
+    try {
+      const bytes = await downloadPart(client, uid, pdf.part, MAX_STATEMENT_BYTES);
+      if (!bytes) continue;
+      const out = await ingestStatementPdf(c, bytes, 'email', { file_name: pdf.filename, ...header });
+      if (!out.ok) { if (!out.notStatement) notes.push(`${pdf.filename}: ${out.error}`); continue; }
+      found++;
+      const r = out.result!;
+      if (r.status === 'registrado') sum.imported++;
+      else if (r.status === 'duplicado') sum.duplicates++;
+      else sum.rejected++;
+      notes.push(`${out.statement.number}: ${r.status}`);
+    } catch (e) { sum.errors++; notes.push(`${pdf.filename}: ${safeError(e, secrets)}`); }
+  }
+  return found;
+}
+
+async function markStatementChecked(mailboxId: number, folder: string, uidValidity: string, uid: number): Promise<void> {
+  await q('UPDATE accounting.mail_messages SET statement_checked = true WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = $4',
+    [mailboxId, folder, uidValidity, uid]);
 }
 
 // ── IMAP ─────────────────────────────────────────────────────────────────────
@@ -133,8 +208,8 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
       const before = opts.until ? new Date(new Date(`${opts.until}T00:00:00-06:00`).getTime() + 86_400_000) : undefined;
       const found = await client.search({ since: new Date(`${since}T00:00:00-06:00`), ...(before ? { before } : {}) }, { uid: true });
       const uids = (Array.isArray(found) ? found : []).sort((a, b) => a - b);
-      const known = new Map((await q<{ uid: number; status: string; attempts: number; dte_count: number; pdf_checked: boolean }>(
-        'SELECT uid, status, attempts, dte_count, pdf_checked FROM accounting.mail_messages WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = ANY($4::bigint[])',
+      const known = new Map((await q<{ uid: number; status: string; attempts: number; dte_count: number; pdf_checked: boolean; statement_checked: boolean }>(
+        'SELECT uid, status, attempts, dte_count, pdf_checked, statement_checked FROM accounting.mail_messages WHERE mailbox_id = $1 AND folder = $2 AND uid_validity = $3 AND uid = ANY($4::bigint[])',
         [box.id, box.folder, uidValidity, uids])).rows.map(k => [Number(k.uid), k]));
       const todo = uids.filter(uid => {
         const k = known.get(uid);
@@ -157,7 +232,14 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
         const jsons = attachments.filter(a => a.kind === 'json');
         const pdfs = attachments.filter(a => a.kind === 'pdf');
         const registrados: Array<{ compraId: number; code: string; control: string | null }> = [];
-        if (!jsons.length) { await saveMessage(c, box.id, box.folder, uidValidity, uid, 'sin_dte', 0, header, null); continue; }
+        if (!jsons.length) {
+          // Sin DTE: ¿algún PDF es un estado de cuenta con intereses?
+          const notes: string[] = [];
+          const found = pdfs.length ? await scanStatements(c, client, uid, pdfs, header, sum, notes, secrets) : 0;
+          await saveMessage(c, box.id, box.folder, uidValidity, uid, found ? 'procesado' : 'sin_dte', found, header, notes.join(' · ').slice(0, 1000) || null);
+          await markStatementChecked(box.id, box.folder, uidValidity, uid);
+          continue;
+        }
         const notes: string[] = [];
         let failed = false;
         let count = 0;
@@ -195,6 +277,7 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
         }
         await saveMessage(c, box.id, box.folder, uidValidity, uid, failed ? 'error' : 'procesado', count, header, notes.join(' · ').slice(0, 1000));
         await markPdfChecked(box.id, box.folder, uidValidity, uid);
+        await markStatementChecked(box.id, box.folder, uidValidity, uid);
       }
 
       // Revisión manual de meses: completa el PDF de las compras de correos procesados antes de que se guardara
@@ -225,6 +308,27 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
             if (registrados.length) await attachMailPdfs(c, client, uid, pdfs, registrados);
           }
           await markPdfChecked(box.id, box.folder, uidValidity, uid);
+        } catch (e) { sum.errors++; }
+      }
+
+      // Revisión manual de meses: busca estados de cuenta en correos sin DTE leídos antes de existir esta función
+      const stmts = opts.trigger === 'manual' && opts.since && !sum.pending
+        ? uids.filter(uid => { const k = known.get(uid); return k && k.status === 'sin_dte' && !k.statement_checked; })
+        : [];
+      for (let i = 0; i < stmts.length; i++) {
+        if (Date.now() - started > BUDGET_MS) { sum.pending = stmts.length - i; break; }
+        const uid = stmts[i]!;
+        try {
+          const msg = await client.fetchOne(String(uid), { uid: true, envelope: true, bodyStructure: true }, { uid: true });
+          const pdfs = msg ? listAttachments(msg.bodyStructure).filter(a => a.kind === 'pdf') : [];
+          if (pdfs.length && msg) {
+            const from = msg.envelope?.from?.[0];
+            const header = { mail_from: from ? (from.name ? `${from.name} <${from.address ?? ''}>` : from.address ?? null) : null, mail_subject: msg.envelope?.subject ?? null };
+            const notes: string[] = [];
+            const found = await scanStatements(c, client, uid, pdfs, header, sum, notes, secrets);
+            if (found) await saveMessage(c, box.id, box.folder, uidValidity, uid, 'procesado', found, header, notes.join(' · ').slice(0, 1000));
+          }
+          await markStatementChecked(box.id, box.folder, uidValidity, uid);
         } catch (e) { sum.errors++; }
       }
     } finally {

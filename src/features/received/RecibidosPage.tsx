@@ -22,7 +22,21 @@ interface Received {
 interface UploadResult { file: string; status: string; detail: string | null; code?: string; warnings?: string[] }
 
 const TONE = { registrado: 'success', duplicado: 'neutral', rechazado: 'warning', error: 'warning' } as const;
-const TYPE: Record<string, string> = { '03': 'CCF', '05': 'NC', '06': 'ND', '14': 'FSE', '01': 'FCF', '11': 'FEX' };
+const TYPE: Record<string, string> = { '03': 'CCF', '05': 'NC', '06': 'ND', '14': 'FSE', '01': 'FCF', '11': 'FEX', EC: 'Estado de cuenta' };
+
+interface StatementLine { fecha: string; descripcion: string; monto: number }
+interface StatementPreview {
+  statement: { bankName: string; account: string; cutDate: string; number: string; interestTotal: number; lines: StatementLine[]; otherLines: StatementLine[] };
+  belongs: boolean;
+  result: { status: string; detail: string | null; compra_id: number | null } | null;
+}
+
+const toBase64 = async (f: File) => {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
 
 /** DTEs de proveedores: se suben o llegan al buzón, y cada uno válido entra al libro de compras. */
 export function RecibidosPage() {
@@ -32,6 +46,12 @@ export function RecibidosPage() {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<UploadResult[] | null>(null);
   const [showRaw, setShowRaw] = useState<number | null>(null);
+  const [statement, setStatement] = useState<{ file: File; preview: StatementPreview } | null>(null);
+  const previewStatement = useMutation({
+    mutationFn: async (file: File) => ({ file, preview: await api.post<StatementPreview>('/v2/received/statement',
+      { name: file.name, content_base64: await toBase64(file), preview: true }) }),
+    onSuccess: setStatement,
+  });
   const refreshData = useDataStore(s => s.refresh);
   const list = useQuery({
     queryKey: ['received', status, search],
@@ -65,9 +85,17 @@ export function RecibidosPage() {
             }} />
           </label>
           <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Puedes elegir varios archivos a la vez.</span>
+          <label className="btn btn-secondary" style={{ cursor: 'pointer', marginLeft: 'auto' }}>
+            {previewStatement.isPending ? 'Leyendo PDF…' : 'Subir estado de cuenta (PDF)'}
+            <input type="file" accept=".pdf,application/pdf" hidden onChange={e => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) previewStatement.mutate(file);
+            }} />
+          </label>
         </div>
       )}
-      <ErrorBanner error={upload.error} />
+      <ErrorBanner error={upload.error ?? previewStatement.error} />
       {results && (
         <div className="table-wrap" style={{ marginBottom: 'var(--s-5)' }}>
           <table className="acc-table"><tbody>{results.map((r, i) => (
@@ -93,7 +121,7 @@ export function RecibidosPage() {
                 <td>{d.issuer_name}<div className="muted" style={{ fontSize: 'var(--text-xs)' }}>NRC {d.issuer_nrc}</div></td>
                 <td className="code" style={{ fontSize: 'var(--text-xs)' }}>{d.control_number}</td>
                 <td className="num">{money(d.taxable_amount)}</td><td className="num">{money(d.iva_amount)}</td><td className="num">{money(d.total_amount)}</td>
-                <td><Badge tone={TONE[d.status]}>{d.status}</Badge>{d.status !== 'registrado' && <div className="muted" style={{ fontSize: 'var(--text-xs)', maxWidth: 260, whiteSpace: 'normal' }}>{d.detail}</div>}</td>
+                <td><Badge tone={TONE[d.status]}>{d.status}</Badge>{(d.status !== 'registrado' || /gasto financiero/.test(d.detail ?? '')) && <div className="muted" style={{ fontSize: 'var(--text-xs)', maxWidth: 260, whiteSpace: 'normal' }}>{d.detail}</div>}</td>
                 <td className="muted">{d.source === 'email' ? (d.mail_from ?? 'correo') : (d.file_name ?? 'subido')}</td>
               </tr>
             ))}</tbody>
@@ -101,6 +129,8 @@ export function RecibidosPage() {
         </div></div>
       )}
       {showRaw !== null && <RawModal id={showRaw} onClose={() => setShowRaw(null)} />}
+      {statement && <StatementModal file={statement.file} preview={statement.preview} onClose={() => setStatement(null)}
+        onDone={() => { void qc.invalidateQueries({ queryKey: ['received'] }); void qc.invalidateQueries({ queryKey: ['acc'] }); void refreshData(); }} />}
     </div>
   );
 }
@@ -110,6 +140,47 @@ function RawModal({ id, onClose }: { id: number; onClose: () => void }) {
   return (
     <Modal title={`DTE ${q.data?.generation_code ?? ''}`} onClose={onClose} size="wide" footer={<Button variant="secondary" onClick={onClose}>Cerrar</Button>}>
       {q.isLoading ? <Loading /> : <pre style={{ fontSize: 11, maxHeight: 500, overflow: 'auto', background: 'var(--surface-2)', padding: 12, borderRadius: 8 }}>{JSON.stringify(q.data?.raw, null, 2)}</pre>}
+    </Modal>
+  );
+}
+
+/** Vista previa del estado de cuenta: intereses que se registrarán como gasto financiero. */
+function StatementModal({ file, preview, onClose, onDone }: { file: File; preview: StatementPreview; onClose: () => void; onDone: () => void }) {
+  const st = preview.statement;
+  const save = useMutation({
+    mutationFn: async () => api.post<StatementPreview>('/v2/received/statement', { name: file.name, content_base64: await toBase64(file) }),
+    onSuccess: () => onDone(),
+  });
+  const result = save.data?.result;
+  return (
+    <Modal title={`Estado de cuenta · ${st.bankName}`} onClose={onClose} size="wide" footer={<>
+      <Button variant="secondary" onClick={onClose}>{result ? 'Cerrar' : 'Cancelar'}</Button>
+      {!result && <Button onClick={() => save.mutate()} disabled={save.isPending || !preview.belongs || st.interestTotal <= 0}>
+        {save.isPending ? 'Registrando…' : `Registrar intereses $${money(st.interestTotal)}`}</Button>}
+    </>}>
+      <ErrorBanner error={save.error} />
+      {result && <div className={`banner banner-${result.status === 'registrado' ? 'success' : 'warning'}`}>{result.detail}</div>}
+      {!preview.belongs && <div className="banner banner-warning">El titular del estado de cuenta no coincide con el nombre o DUI de Mi empresa: no se puede registrar.</div>}
+      <div className="stat-row" style={{ marginBottom: 12 }}>
+        <span>{st.account}</span><span>Corte <strong>{dmy(st.cutDate)}</strong></span>
+        <span>Intereses del mes <strong>${money(st.interestTotal)}</strong></span>
+      </div>
+      {st.lines.length === 0 ? <EmptyState title="Sin intereses en este corte" description="No hay movimientos de intereses en el detalle de transacciones." /> : (
+        <div className="table-wrap"><table className="acc-table">
+          <thead><tr><th>Fecha</th><th>Intereses cobrados</th><th className="num">Monto</th></tr></thead>
+          <tbody>{st.lines.map((l, i) => <tr key={i}><td className="code">{dmy(l.fecha)}</td><td>{l.descripcion}</td><td className="num">{money(l.monto)}</td></tr>)}
+            <tr className="total"><td colSpan={2}>Total gasto financiero</td><td className="num">{money(st.interestTotal)}</td></tr></tbody>
+        </table></div>
+      )}
+      {st.otherLines.length > 0 && (
+        <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 8 }}>
+          No se suman como intereses: {st.otherLines.map(l => `${l.descripcion} $${money(l.monto)}`).join(' · ')}.
+        </p>
+      )}
+      <p className="muted" style={{ fontSize: 'var(--text-xs)', marginTop: 8 }}>
+        Se registra en Compras como gasto financiero sin IVA (no entra al anexo del F-07), con este PDF adjunto. El buzón de correo
+        también lee estos PDF automáticamente cuando llegan sin DTE.
+      </p>
     </Modal>
   );
 }

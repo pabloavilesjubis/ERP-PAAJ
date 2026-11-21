@@ -56,6 +56,8 @@ interface FormState {
   retencionCodigoIngreso: string; // código de ingreso F-14 (campo 22)
   afpRetenido: string;            // F-14 campo 12 (solo empleados op 01/60)
   isssRetenido: string;           // F-14 campo 13 (solo empleados op 01/60)
+  gastoFinanciero: boolean;       // intereses de préstamos/tarjetas: gasto deducible en renta
+  intereses: string;
 }
 
 const emptyForm: FormState = {
@@ -79,6 +81,8 @@ const emptyForm: FormState = {
   tipoCostoGasto: '2',
   numeroAnexo: '3',
   aplicaRetencion: false,
+  gastoFinanciero: false,
+  intereses: '',
   tipoPersona: 'natural',
   retencionCodigoMH: '9300',
   retencionRenta: '',
@@ -232,14 +236,20 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
   useEffect(() => { void refresh({ maxAgeMs: 60_000 }); }, [refresh]);
 
   const [proveedorFiltro, setProveedorFiltro] = useState('');
+  const [soloFinancieros, setSoloFinancieros] = useState(false);
+  const esFinanciero = (r: { metadata?: { categoria?: string } }) => r.metadata?.categoria === 'gasto_financiero';
+  const interesesDe = (r: { monto: string | number; metadata?: { intereses?: string } }) => num(r.metadata?.intereses ?? r.monto);
   const delPeriodo = data.compras.filter(r => matchesPeriod(r.fecha, mode, month, year));
   const proveedoresPeriodo = [...new Set(delPeriodo.map(r => r.proveedor).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const filtro = proveedorFiltro.trim().toLowerCase();
   const filtroDigitos = filtro.replace(/\D/g, '');
-  const rows = filtro
+  const rows = (filtro
     ? delPeriodo.filter(r => r.proveedor.toLowerCase().includes(filtro)
         || (!!filtroDigitos && (r.nrc ?? '').replace(/\D/g, '').includes(filtroDigitos)))
-    : delPeriodo;
+    : delPeriodo).filter(r => !soloFinancieros || esFinanciero(r));
+  const interesesPeriodo = delPeriodo.filter(esFinanciero).reduce((s, r) => s + interesesDe(r), 0);
+  const financierosAnio = data.compras.filter(r => esFinanciero(r) && (r.fecha ?? '').startsWith(String(year)) && !r.metadata?.anulado);
+  const interesesAnio = financierosAnio.reduce((s, r) => s + interesesDe(r), 0);
   const totalMonto = rows.reduce((s, r) => s + num(r.monto), 0);
   const totalIva = rows.reduce((s, r) => s + num(r.ivaCredito), 0);
   const totalRetenido = rows.reduce((s, r) => s + num(r.metadata?.retencionRenta ?? 0), 0);
@@ -294,6 +304,8 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       retencionCodigoIngreso: m.retencionCodigoIngreso ?? (tipoPersona === 'juridica' ? '4' : '2'),
       afpRetenido: m.afpRetenido ?? '',
       isssRetenido: m.isssRetenido ?? '',
+      gastoFinanciero: m.categoria === 'gasto_financiero',
+      intereses: m.intereses ?? '',
     });
     setEditId(r.id);
     resetModalState();
@@ -470,6 +482,16 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
         : undefined,
       pdfPath,
       pdfFilename,
+      // Lo que llega del buzón o de un estado de cuenta se conserva al editar
+      ivaNoDeducible: pm.ivaNoDeducible,
+      origen: pm.origen,
+      cuenta: pm.cuenta,
+      fechaCorte: pm.fechaCorte,
+      otrosCargos: pm.otrosCargos,
+      categoria: form.gastoFinanciero ? 'gasto_financiero' : undefined,
+      intereses: form.gastoFinanciero ? (num(form.intereses) > 0 ? num(form.intereses) : num(form.monto)).toFixed(2) : undefined,
+      detalleIntereses: form.gastoFinanciero ? pm.detalleIntereses : undefined,
+      deducibleRenta: form.gastoFinanciero ? (pm.deducibleRenta ?? true) : undefined,
     };
 
     const payload: Compra = {
@@ -548,7 +570,10 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
             onChange={e => setProveedorFiltro(e.target.value)} style={{ width: 300 }} />
           <datalist id="compras-proveedores">{proveedoresPeriodo.map(p => <option key={p} value={p} />)}</datalist>
           {proveedorFiltro && <Button variant="secondary" size="sm" onClick={() => setProveedorFiltro('')}>Quitar filtro</Button>}
-          {proveedorFiltro && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{rows.length} de {delPeriodo.length}</span>}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+            <input type="checkbox" checked={soloFinancieros} onChange={e => setSoloFinancieros(e.target.checked)} /> Solo gastos financieros
+          </label>
+          {(proveedorFiltro || soloFinancieros) && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{rows.length} de {delPeriodo.length}</span>}
         </div>
         <Button onClick={openNew} leading={<Icon name="plus" size={15} />}>Agregar compra</Button>
       </div>
@@ -557,6 +582,10 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
         <KpiCard label="Total compras" size="md" value={fmt(totalMonto)} hint={`${rows.length} registros`} />
         <KpiCard label="IVA crédito fiscal" tone="success" size="md" value={fmt(totalIva)} hint="Acreditable contra débito" />
         <KpiCard label="Subtotal (sin IVA)" size="md" value={fmt(totalMonto - totalIva)} hint="Costo neto" />
+        {interesesAnio > 0 && (
+          <KpiCard label="Gastos financieros (intereses)" size="md" value={fmt(interesesPeriodo)}
+            hint={`Deducibles en renta · acumulado ${year}: ${fmt(interesesAnio)} (${financierosAnio.length} doc.)`} />
+        )}
         {totalRetenido > 0 && (
           <KpiCard
             label="Retención hecha (F-14)"
@@ -605,7 +634,14 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                       </span>
                     </td>
                     <td><code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{docCorto}</code></td>
-                    <td style={{ fontWeight: 500 }}>{r.proveedor}</td>
+                    <td style={{ fontWeight: 500 }}>
+                      {r.proveedor}
+                      {esFinanciero(r) && (
+                        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 400, color: 'var(--fg-3)' }}>
+                          <span className="badge badge-info">Gasto financiero</span> intereses {fmt(interesesDe(r))}{m.cuenta ? ` · ${m.cuenta}` : ''}
+                        </div>
+                      )}
+                    </td>
                     <td><code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>{r.nrc}</code></td>
                     <td className="num">{fmt(base)}</td>
                     <td className="num" style={{ color: 'var(--success-text)' }}>{fmt(r.ivaCredito)}</td>
@@ -876,6 +912,26 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
               </Field>
               <div />
             </div>
+          </div>
+
+          {/* Gasto financiero (intereses) — deducible en renta */}
+          <div style={{ background: 'var(--surface-2)', borderRadius: 'var(--r-md)', padding: 'var(--s-4)', border: '1px solid var(--border)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--s-2)', cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 500 }}>
+              <input type="checkbox" checked={form.gastoFinanciero}
+                onChange={e => { const checked = e.target.checked; setForm(p => ({ ...p, gastoFinanciero: checked, intereses: checked ? (p.intereses || p.monto) : '' })); }} />
+              Gasto financiero — intereses de préstamo o tarjeta
+            </label>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)', marginTop: 4, marginLeft: 24 }}>
+              No da crédito fiscal, pero los intereses son gasto del ejercicio para la declaración de renta. Se contabilizan en «Gastos financieros».
+            </div>
+            {form.gastoFinanciero && (
+              <div style={{ marginTop: 'var(--s-3)', marginLeft: 24, maxWidth: 260 }}>
+                <Field label="Monto de intereses">
+                  <Input inputMode="decimal" value={form.intereses} placeholder={form.monto || '0.00'}
+                    onChange={e => setForm(p => ({ ...p, intereses: e.target.value }))} />
+                </Field>
+              </div>
+            )}
           </div>
 
           {/* Retención de Renta (10%) — F-14 */}

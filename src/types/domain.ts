@@ -114,6 +114,17 @@ export type ClaseDocumento = '1' | '2' | '3' | '4';
 
 /** Tipo de documento (códigos del MH): 03=CCF, 14=Sujeto Excluido, etc. */
 export interface CompraMetadata {
+  /** Gasto financiero (intereses de préstamos y tarjetas): deducible en renta, sin IVA acreditable */
+  categoria?: 'gasto_financiero' | string;
+  /** Parte de intereses del documento (el resto: capital, pólizas, comisiones) */
+  intereses?: string;
+  detalleIntereses?: Array<{ fecha?: string; descripcion: string; monto: number }>;
+  otrosCargos?: Array<{ fecha?: string; descripcion: string; monto: number }>;
+  deducibleRenta?: boolean;
+  /** Estado de cuenta: tarjeta/cuenta enmascarada y fecha de corte */
+  cuenta?: string;
+  fechaCorte?: string;
+  origen?: string;
   claseDocumento?: ClaseDocumento;
   tipoDocumento?: string;        // '03', '14', '05', etc.
   numeroDocumento?: string;      // Cód. Generación (DTE) o correlativo (impreso)

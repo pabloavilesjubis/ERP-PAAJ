@@ -4,7 +4,7 @@ import { requirePerm } from '../../auth/auth.middleware.js';
 import { decryptSecret, encryptSecret } from '../../auth/crypto.js';
 import { ValidationError } from '../../errors.js';
 import { authedPlugin, ctx, idParam, intParam, parse, q } from '../http.js';
-import { imapClient, ingestText, runMailbox, safeError } from './service.js';
+import { imapClient, ingestStatementPdf, ingestText, runMailbox, safeError } from './service.js';
 
 /**
  * DTEs recibidos (F6): subir JSON de proveedores o leerlos del buzón IMAP de
@@ -38,6 +38,15 @@ export async function registerReceivedRoutes(app: FastifyInstance): Promise<void
         }
       }
       return { results };
+    });
+
+    // Estado de cuenta (PDF) de tarjeta o préstamo: intereses del corte como gasto financiero
+    r.post('/v2/received/statement', { preHandler: requirePerm('accounting:post'), bodyLimit: 12 * 1024 * 1024 }, async (req) => {
+      const c = ctx(req);
+      const b = parse(z.object({ name: z.string().max(200), content_base64: z.string().min(10).max(11_500_000), preview: z.boolean().default(false) }), req.body);
+      const out = await ingestStatementPdf(c, Buffer.from(b.content_base64, 'base64'), 'upload', { file_name: b.name }, b.preview);
+      if (!out.ok) throw new ValidationError(out.error);
+      return { statement: out.statement, belongs: out.belongs, result: out.result };
     });
 
     r.get('/v2/received', { preHandler: requirePerm('accounting:view') }, async (req) => {
