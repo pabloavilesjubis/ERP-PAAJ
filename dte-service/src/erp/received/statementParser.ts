@@ -36,15 +36,20 @@ const iso = (d: string) => { const [dd, mm, yy] = d.split('/'); return `${yy}-${
 const amount = (v: string) => Number(v.replace(/[$,\s]/g, ''));
 
 /** Texto del PDF, una línea por renglón visual (los fragmentos se ordenan por posición). */
-export async function extractPdfText(bytes: Uint8Array): Promise<string> {
+export async function extractPdfText(bytes: Uint8Array, passwords: string[] = []): Promise<string> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   let doc;
-  try {
-    doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, useSystemFonts: false, disableFontFace: true, verbosity: 0 }).promise;
-  } catch (e) {
-    if ((e as { name?: string }).name === 'PasswordException') throw new Error('El PDF tiene contraseña: ábrelo, guárdalo sin contraseña y súbelo');
-    throw new Error('No se pudo leer el PDF');
+  // Los bancos suelen proteger el estado de cuenta con el DUI o el NIT del titular: se prueban esos
+  for (const password of [undefined, ...new Set(passwords.filter(Boolean))]) {
+    try {
+      doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), password, isEvalSupported: false, useSystemFonts: false,
+        disableFontFace: true, verbosity: 0 }).promise;
+      break;
+    } catch (e) {
+      if ((e as { name?: string }).name !== 'PasswordException') throw new Error('No se pudo leer el PDF');
+    }
   }
+  if (!doc) throw new Error('El PDF tiene una contraseña distinta del DUI o NIT de Mi empresa: ábrelo, guárdalo sin contraseña y súbelo');
   const out: string[] = [];
   try {
     for (let p = 1; p <= Math.min(doc.numPages, 20); p++) {
@@ -118,4 +123,15 @@ export function statementBelongsTo(text: string, names: Array<string | null | un
   const d = (dui ?? '').replace(/\D/g, '');
   if (d.length === 9 && (text.includes(`${d.slice(0, 8)}-${d[8]}`) || new RegExp(`(^|\\D)${d}(\\D|$)`).test(text))) return true;
   return false;
+}
+
+/** Contraseñas habituales de los estados de cuenta: DUI y NIT con y sin guion. */
+export function statementPasswords(dui: string | null | undefined, nit: string | null | undefined): string[] {
+  const out: string[] = [];
+  const d = (dui ?? '').replace(/\D/g, '');
+  if (d.length === 9) out.push(d, `${d.slice(0, 8)}-${d[8]}`, d.slice(0, 8));
+  const n = (nit ?? '').replace(/\D/g, '');
+  if (n.length === 14) out.push(n, `${n.slice(0, 4)}-${n.slice(4, 10)}-${n.slice(10, 13)}-${n[13]}`);
+  else if (n.length === 9 && n !== d) out.push(n, `${n.slice(0, 8)}-${n[8]}`);
+  return out;
 }

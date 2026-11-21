@@ -4,7 +4,7 @@ import type pg from 'pg';
 import { decryptSecret } from '../../auth/crypto.js';
 import { q, tx, type Ctx } from '../http.js';
 import { parseDteJson, type ParsedDte } from './dteParser.js';
-import { extractPdfText, parseStatement, statementBelongsTo, type ParsedStatement } from './statementParser.js';
+import { extractPdfText, parseStatement, statementBelongsTo, statementPasswords, type ParsedStatement } from './statementParser.js';
 
 /**
  * Buzón de DTEs recibidos (portado de ChuchoWash api/_lib/mail/*): cada
@@ -65,14 +65,14 @@ export async function ingestText(c: Ctx, text: string, source: 'upload' | 'email
 export async function ingestStatementPdf(c: Ctx, bytes: Buffer, source: 'upload' | 'email', meta: { file_name?: string | null; mail_from?: string | null; mail_subject?: string | null }, preview = false):
   Promise<{ ok: true; statement: ParsedStatement; belongs: boolean; result: IngestResult | null } | { ok: false; notStatement: boolean; error: string }> {
   if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') return { ok: false, notStatement: true, error: 'El archivo no es un PDF' };
+  const who = (await q<{ emisor_nombre: string | null; emisor_dui: string | null; mh_nit: string | null; nombre_legal: string | null }>(
+    `SELECT e.emisor_nombre, e.emisor_dui, e.mh_nit, t.nombre_legal FROM public.tenants t
+       LEFT JOIN public.tenant_emisor e ON e.tenant_id = t.id WHERE t.id = $1`, [c.tenantId])).rows[0];
   let text: string;
-  try { text = await extractPdfText(bytes); }
+  try { text = await extractPdfText(bytes, statementPasswords(who?.emisor_dui, who?.mh_nit)); }
   catch (e) { return { ok: false, notStatement: false, error: e instanceof Error ? e.message : 'No se pudo leer el PDF' }; }
   const st = parseStatement(text);
   if (!st) return { ok: false, notStatement: true, error: 'No parece un estado de cuenta (no tiene fecha de corte)' };
-  const who = (await q<{ emisor_nombre: string | null; emisor_dui: string | null; nombre_legal: string | null }>(
-    `SELECT e.emisor_nombre, e.emisor_dui, t.nombre_legal FROM public.tenants t
-       LEFT JOIN public.tenant_emisor e ON e.tenant_id = t.id WHERE t.id = $1`, [c.tenantId])).rows[0];
   const belongs = statementBelongsTo(text, [who?.emisor_nombre, who?.nombre_legal], who?.emisor_dui);
   if (preview) return { ok: true, statement: st, belongs, result: null };
   const doc = {

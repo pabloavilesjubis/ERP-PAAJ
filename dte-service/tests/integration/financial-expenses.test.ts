@@ -24,9 +24,9 @@ const cuscatlan = { nit: '06140806720015', nrc: '1465', nombre: 'BANCO CUSCATLAN
 const promerica = { nit: '05110402951018', nrc: '830860', nombre: 'BANCO PROMERICA, SOCIEDAD ANONIMA', codActividad: '64190', descActividad: 'BANCOS' };
 
 /** Estado de cuenta de tarjeta con el formato de columnas de los bancos (fecha · detalle · monto). */
-function statementPdf(holder: string): Promise<Buffer> {
+function statementPdf(holder: string, userPassword?: string): Promise<Buffer> {
   return new Promise((resolve) => {
-    const doc = new PDFDocument({ size: 'LETTER', margin: 30 });
+    const doc = new PDFDocument({ size: 'LETTER', margin: 30, ...(userPassword ? { userPassword, pdfVersion: '1.7' as const } : {}) });
     const chunks: Buffer[] = [];
     doc.on('data', (c: Buffer) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -149,6 +149,12 @@ describe.skipIf(!hasDb)('gastos financieros: intereses de bancos y estados de cu
     expect((await send(pdf)).json().result.status).toBe('duplicado');
     const ajeno = await send(await statementPdf('JUAN CARLOS RAMIREZ ORTIZ'));
     expect(ajeno.json().result).toMatchObject({ status: 'rechazado', detail: expect.stringMatching(/titular/) });
+    // Protegido con el DUI del titular (como lo mandan los bancos): se abre solo
+    const protegido = await send(await statementPdf(HOLDER, DUI), true);
+    expect(protegido.statusCode, protegido.body).toBe(200);
+    expect(protegido.json().statement.interestTotal).toBe(648.4);
+    const otraClave = await send(await statementPdf(HOLDER, 'clave-secreta'), true);
+    expect(otraClave.json().message).toMatch(/contraseña/);
     const noPdf = await send(Buffer.from('hola mundo, esto no es un pdf'));
     expect(noPdf.statusCode).toBe(400);
   });
