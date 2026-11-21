@@ -237,7 +237,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
 
   const [proveedorFiltro, setProveedorFiltro] = useState('');
   const [soloFinancieros, setSoloFinancieros] = useState(false);
-  const esFinanciero = (r: { metadata?: { categoria?: string } }) => r.metadata?.categoria === 'gasto_financiero';
+  const esFinanciero = (r: { metadata?: { categoria?: string; anulado?: boolean } }) => r.metadata?.categoria === 'gasto_financiero' && !r.metadata?.anulado;
   const interesesDe = (r: { monto: string | number; metadata?: { intereses?: string } }) => num(r.metadata?.intereses ?? r.monto);
   const delPeriodo = data.compras.filter(r => matchesPeriod(r.fecha, mode, month, year));
   const proveedoresPeriodo = [...new Set(delPeriodo.map(r => r.proveedor).filter(Boolean))].sort((a, b) => a.localeCompare(b));

@@ -54,7 +54,12 @@ export async function ingestText(c: Ctx, text: string, source: 'upload' | 'email
   const d = parsed.data;
   const res = await tx(db => q<{ r: IngestResult }>('SELECT accounting.ingest_received_dte($1, $2::jsonb, $3::jsonb, $4, $5::jsonb) AS r',
     [c.tenantId, JSON.stringify(docForSql(d)), JSON.stringify(d.raw), source, JSON.stringify(meta)], db), c);
-  return { ok: true, result: res.rows[0]!.r, warnings: d.warnings, code: d.generationCode, control: d.controlNumber || null };
+  const result = res.rows[0]!.r;
+  // Factura de intereses del banco: reemplaza el estado de cuenta del mismo mes
+  if (result.status === 'registrado' && result.compra_id) {
+    await tx(db => q('SELECT accounting.supersede_statements($1, $2)', [c.tenantId, result.compra_id], db), c);
+  }
+  return { ok: true, result, warnings: d.warnings, code: d.generationCode, control: d.controlNumber || null };
 }
 
 /**

@@ -158,4 +158,25 @@ describe.skipIf(!hasDb)('gastos financieros: intereses de bancos y estados de cu
     const noPdf = await send(Buffer.from('hola mundo, esto no es un pdf'));
     expect(noPdf.statusCode).toBe(400);
   });
+
+  it('si el banco emite factura de intereses de la tarjeta en el mes, el estado de cuenta no se considera', async () => {
+    const { query } = await db();
+    const ec = (await query<{ id: number }>(`SELECT id FROM compras WHERE tenant_id = $1 AND metadata->>'numeroDocumento' = 'EC-CUSCATLAN-1234-20261108'`, [t.tenantId])).rows[0]!;
+    // Llega la factura del pago de intereses de la tarjeta (noviembre): el estado de cuenta de noviembre se anula
+    const res = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files: [
+      { name: 'tarjeta.json', content: bankDte('9B9B9B9B-0000-4DE8-A4E9-A0EE9047B53E', cuscatlan, [['PAGO INTERES TARJ DE CREDITO', 552.55]], '2026-11-06') }] } });
+    expect(res.json().results[0].status, res.body).toBe('registrado');
+    const anulado = (await query<{ metadata: Record<string, unknown> }>('SELECT metadata FROM compras WHERE id = $1', [ec.id])).rows[0]!.metadata;
+    expect(anulado).toMatchObject({ anulado: true, motivoAnulacion: expect.stringMatching(/factura de intereses/) });
+    // Otro estado de cuenta de tarjeta del mismo banco y mes: ya hay factura, no se registra
+    const r = (await query<{ r: { status: string; detail: string } }>('SELECT accounting.ingest_financial_statement($1, $2::jsonb, $3, $4::jsonb) AS r', [t.tenantId,
+      JSON.stringify({ number: 'EC-CUSCATLAN-9999-20261108', bank_name: 'BANCO CUSCATLAN DE EL SALVADOR, S.A.', bank_nit: '06140806720015',
+        account: 'Tarjeta ****9999', cut_date: '2026-11-08', interest_total: 100, lines: [] }), 'upload', '{}'])).rows[0]!.r;
+    expect(r).toMatchObject({ status: 'duplicado', detail: expect.stringMatching(/ya emitió factura de intereses de tarjeta/) });
+    // La factura del hipotecario (préstamo) no tapa un estado de cuenta de préstamo de otro banco ni de tarjeta de otro mes
+    const otroMes = (await query<{ r: { status: string } }>('SELECT accounting.ingest_financial_statement($1, $2::jsonb, $3, $4::jsonb) AS r', [t.tenantId,
+      JSON.stringify({ number: 'EC-CUSCATLAN-9999-20261208', bank_name: 'BANCO CUSCATLAN DE EL SALVADOR, S.A.', bank_nit: '06140806720015',
+        account: 'Tarjeta ****9999', cut_date: '2026-12-08', interest_total: 100, lines: [] }), 'upload', '{}'])).rows[0]!.r;
+    expect(otroMes.status).toBe('registrado');
+  });
 });
