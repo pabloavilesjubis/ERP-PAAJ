@@ -58,6 +58,7 @@ interface FormState {
   isssRetenido: string;           // F-14 campo 13 (solo empleados op 01/60)
   gastoFinanciero: boolean;       // intereses de préstamos/tarjetas: gasto deducible en renta
   intereses: string;
+  deducibleRenta: boolean;
 }
 
 const emptyForm: FormState = {
@@ -83,6 +84,7 @@ const emptyForm: FormState = {
   aplicaRetencion: false,
   gastoFinanciero: false,
   intereses: '',
+  deducibleRenta: true,
   tipoPersona: 'natural',
   retencionCodigoMH: '9300',
   retencionRenta: '',
@@ -307,6 +309,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       isssRetenido: m.isssRetenido ?? '',
       gastoFinanciero: m.categoria === 'gasto_financiero',
       intereses: m.intereses ?? '',
+      deducibleRenta: m.deducibleRenta !== false,
     });
     setEditId(r.id);
     resetModalState();
@@ -493,7 +496,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       categoria: form.gastoFinanciero ? 'gasto_financiero' : undefined,
       intereses: form.gastoFinanciero ? (num(form.intereses) > 0 ? num(form.intereses) : num(form.monto)).toFixed(2) : undefined,
       detalleIntereses: form.gastoFinanciero ? pm.detalleIntereses : undefined,
-      deducibleRenta: form.gastoFinanciero ? (pm.deducibleRenta ?? true) : undefined,
+      deducibleRenta: form.gastoFinanciero ? form.deducibleRenta : undefined,
     };
 
     const payload: Compra = {
@@ -944,6 +947,10 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                   <Input inputMode="decimal" value={form.intereses} placeholder={form.monto || '0.00'}
                     onChange={e => setForm(p => ({ ...p, intereses: e.target.value }))} />
                 </Field>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)', marginTop: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.deducibleRenta} onChange={e => setForm(p => ({ ...p, deducibleRenta: e.target.checked }))} />
+                  Deducible en renta (el préstamo se usa en mi actividad)
+                </label>
               </div>
             )}
           </div>

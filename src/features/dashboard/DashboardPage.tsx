@@ -1,9 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { KpiCard } from '@/components/ui/KpiCard';
+import { Button } from '@/components/ui/Button';
 import { MONTHS } from '@/config/constants';
 import { useDataStore } from '@/stores/data.store';
 import { usePeriodStore } from '@/stores/period.store';
 import { computeTaxSummary } from '@/lib/utils/tax';
+import { anualDeMensual, estimarRentaAnual, TABLA_MENSUAL_DEFAULT } from '@/lib/utils/renta-anual';
 import { fmt, num, inPeriod } from '@/lib/utils/format';
 
 export function DashboardPage() {
@@ -36,6 +38,9 @@ export function DashboardPage() {
       return { label: MONTHS[mi].slice(0, 3), total: vc + vt, cp, fin };
     });
   }, [data, month, year, mode]);
+  const renta = useMemo(() => mode === 'annual'
+    ? estimarRentaAnual({ ...data, year, tablaAnual: anualDeMensual(TABLA_MENSUAL_DEFAULT) })
+    : null, [data, year, mode]);
   const maxVal = Math.max(...monthsData.map(d => Math.max(d.total, d.cp + d.fin)), 1);
   const finMes = useMemo(() => splitCompras(data.compras.filter(r => mode === 'annual'
     ? (r.fecha ?? '').startsWith(String(year)) : inPeriod(r.fecha, month, year))), [data, month, year, mode]);
@@ -134,6 +139,35 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {renta && (
+        <div className="tax-card" style={{ marginBottom: 'var(--s-5)' }}>
+          <div className="tax-card-title">Renta anual estimada {year} (F-11) — persona natural</div>
+          <TaxRow label="Ingresos del año (sin IVA)" sub={`${renta.documentos.ventas} ventas · consumidor final sin el 13 % incluido`} value={fmt(renta.ingresos)} />
+          <TaxRow label="Costos y gastos" sub={`${renta.documentos.compras} compras · sin el IVA acreditable (el de facturas 01 es costo)`} value={`− ${fmt(renta.costosGastos)}`} variant="credit" />
+          <TaxRow label="Gastos financieros deducibles (intereses)"
+            sub={`${renta.documentos.financieros} documentos de bancos y estados de cuenta${renta.gastosFinancierosNoDeducibles > 0 ? ` · ${fmt(renta.gastosFinancierosNoDeducibles)} marcados como no deducibles` : ''}`}
+            value={`− ${fmt(renta.gastosFinancieros)}`} variant="credit" />
+          <TaxRow label="Renta neta imponible" value={fmt(renta.rentaNeta)} />
+          <TaxRow label="Impuesto según tabla"
+            sub={renta.tramo && renta.tramo.tasa > 0
+              ? `${(renta.tramo.tasa * 100).toFixed(0)} % sobre el exceso de ${fmt(renta.tramo.sobreExceso)} + cuota fija ${fmt(renta.tramo.cuotaFija)}`
+              : 'Tramo exento'}
+            value={fmt(renta.impuesto)} variant="debit" />
+          <TaxRow label="Retenciones de renta que te hicieron" sub={`10 % de tus ventas con retención (${fmt(renta.ventasConRetencion)}) · el cliente lo entera a Hacienda por ti`} value={`− ${fmt(renta.retenciones)}`} variant="credit" />
+          <RetencionesClientes year={year} />
+          <TaxRow label="Pago a cuenta del año (F-14, 1.75 %)" sub="Sobre las ventas sin retención, pagado cada mes" value={`− ${fmt(renta.pagoACuenta)}`} variant="credit" />
+          <div className="tax-total-row">
+            <div className="tax-total-label">{renta.aPagar >= 0 ? 'Impuesto estimado a pagar en la declaración anual' : 'Saldo estimado a tu favor (devolución)'}</div>
+            <div className="tax-total-value">{fmt(Math.abs(renta.aPagar))}</div>
+          </div>
+          <div className="tax-row-sub" style={{ marginTop: 'var(--s-3)' }}>
+            Estimación de apoyo con lo registrado en el sistema. Tabla anual = tabla mensual de retención vigente × 12. No incluye deducciones
+            personales (gastos médicos, colegiaturas), planillas ni otros ingresos; los intereses solo son deducibles si el préstamo se usa en tu
+            actividad. Confírmalo con tu contador antes de declarar.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -159,4 +193,65 @@ function splitCompras(rows: Array<{ monto: string | number; metadata?: { categor
     else cp += num(r.monto);
   }
   return { cp, fin };
+}
+
+/**
+ * Clientes que retienen renta (10 % por servicios): la retención no viene en el
+ * CCF, la aplica el cliente al pagar. Registrarla en cada venta la descuenta de la
+ * base del pago a cuenta y la cuenta como anticipo en la declaración anual.
+ */
+function RetencionesClientes({ year }: { year: number }) {
+  const ventas = useDataStore(s => s.data.ventasContribuyente);
+  const patch = useDataStore(s => s.patch);
+  const [busy, setBusy] = useState<string | null>(null);
+  const clientes = useMemo(() => {
+    const m = new Map<string, { nombre: string; n: number; base: number; conRet: number; ret: number }>();
+    for (const v of ventas) {
+      if (!(v.fecha ?? '').startsWith(String(year)) || (v.metadata as { anulado?: boolean } | undefined)?.anulado) continue;
+      const k = (v.cliente || 'Sin nombre').trim().toUpperCase();
+      const c = m.get(k) ?? { nombre: v.cliente || 'Sin nombre', n: 0, base: 0, conRet: 0, ret: 0 };
+      const r = num(v.metadata?.retencionRenta ?? 0);
+      c.n++; c.base += num(v.gravado) + num(v.exento);
+      if (r > 0) { c.conRet++; c.ret += r; }
+      m.set(k, c);
+    }
+    return [...m.entries()].sort((a, b) => b[1].base - a[1].base);
+  }, [ventas, year]);
+  if (!clientes.length) return null;
+
+  const aplicar = async (key: string) => {
+    setBusy(key);
+    try {
+      await patch(prev => ({
+        ...prev,
+        ventasContribuyente: prev.ventasContribuyente.map(v => {
+          if (!(v.fecha ?? '').startsWith(String(year)) || (v.cliente || 'Sin nombre').trim().toUpperCase() !== key) return v;
+          if (num(v.metadata?.retencionRenta ?? 0) > 0 || (v.metadata as { anulado?: boolean } | undefined)?.anulado) return v;
+          const base = num(v.gravado) + num(v.exento);
+          return { ...v, metadata: { ...(v.metadata ?? {}), retencionRenta: (Math.round(base * 10) / 100).toFixed(2) } };
+        }),
+      }));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={{ margin: '0 0 var(--s-3)', padding: 'var(--s-3)', border: '1px dashed var(--border)', borderRadius: 'var(--r-md)' }}>
+      <div className="tax-row-sub" style={{ marginBottom: 6 }}>
+        Clientes con CCF en {year}. La retención del 10 % no viene en el CCF: regístrala en las ventas del cliente que te retiene (p. ej. por servicios).
+      </div>
+      {clientes.map(([k, c]) => (
+        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 'var(--text-sm)', padding: '4px 0' }}>
+          <span style={{ flex: 1, minWidth: 180 }}><strong>{c.nombre}</strong> · {c.n} CCF · {fmt(c.base)}</span>
+          <span className="muted">retención registrada en {c.conRet} de {c.n} ({fmt(c.ret)})</span>
+          {c.conRet < c.n && (
+            <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void aplicar(k)}>
+              {busy === k ? 'Registrando…' : `Registrar 10 % en ${c.n - c.conRet} venta(s)`}
+            </Button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
