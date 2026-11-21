@@ -4,7 +4,7 @@ import type pg from 'pg';
 import { decryptSecret } from '../../auth/crypto.js';
 import { q, tx, type Ctx } from '../http.js';
 import { parseDteJson, type ParsedDte } from './dteParser.js';
-import { extractPdfText, parseStatement, statementBelongsTo, statementPasswords, type ParsedStatement } from './statementParser.js';
+import { extractPdfText, makeStampLookup, parseStatement, statementBelongsTo, statementPasswords, type ParsedStatement } from './statementParser.js';
 
 /**
  * Buzón de DTEs recibidos (portado de ChuchoWash api/_lib/mail/*): cada
@@ -46,12 +46,18 @@ export function decodeJson(bytes: Buffer): string {
 }
 
 /** Un JSON → resultado de ingesta. Errores de lectura se devuelven como texto. */
-export async function ingestText(c: Ctx, text: string, source: 'upload' | 'email', meta: Record<string, unknown>):
+export async function ingestText(c: Ctx, text: string, source: 'upload' | 'email', meta: Record<string, unknown>,
+  stampFor?: (code: string, control: string | null) => Promise<string | null>):
   Promise<{ ok: true; result: IngestResult; warnings: string[]; code: string; control: string | null } | { ok: false; error: string }> {
   const parsed = parseDteJson(text);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   if (!parsed.data.generationCode) return { ok: false, error: 'El JSON no tiene código de generación' };
   const d = parsed.data;
+  // Hay emisores que no ponen el sello en el JSON, solo en el PDF
+  if (!d.receptionStamp && stampFor) {
+    const stamp = await stampFor(d.generationCode, d.controlNumber || null);
+    if (stamp) { d.receptionStamp = stamp; d.warnings = [...d.warnings, 'Sello de recepción tomado del PDF']; }
+  }
   const res = await tx(db => q<{ r: IngestResult }>('SELECT accounting.ingest_received_dte($1, $2::jsonb, $3::jsonb, $4, $5::jsonb) AS r',
     [c.tenantId, JSON.stringify(docForSql(d)), JSON.stringify(d.raw), source, JSON.stringify(meta)], db), c);
   const result = res.rows[0]!.r;
@@ -248,6 +254,14 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
         const notes: string[] = [];
         let failed = false;
         let count = 0;
+        const stampFor = makeStampLookup(async () => {
+          const texts: string[] = [];
+          for (const pdf of pdfs.slice(0, 6)) {
+            const bytes = await downloadPart(client, uid, pdf.part, MAX_STATEMENT_BYTES).catch(() => null);
+            if (bytes) texts.push(await extractPdfText(bytes).catch(() => ''));
+          }
+          return texts.filter(Boolean);
+        }, jsons.length === 1);
         for (const j of jsons) {
           try {
             const dl = await client.download(String(uid), j.part, { uid: true, maxBytes: MAX_DTE_JSON_BYTES + 1 });
@@ -260,7 +274,7 @@ export async function runMailbox(c: Ctx, mailboxId: number, opts: { since?: stri
               if (size > MAX_DTE_JSON_BYTES) break;
             }
             if (size > MAX_DTE_JSON_BYTES) { notes.push(`${j.filename}: demasiado grande`); continue; }
-            const out = await ingestText(c, decodeJson(Buffer.concat(chunks)), 'email', { file_name: j.filename, ...header });
+            const out = await ingestText(c, decodeJson(Buffer.concat(chunks)), 'email', { file_name: j.filename, ...header }, stampFor);
             if (!out.ok) { notes.push(`${j.filename}: ${out.error}`); continue; }
             count++;
             if (out.result.status === 'registrado') {

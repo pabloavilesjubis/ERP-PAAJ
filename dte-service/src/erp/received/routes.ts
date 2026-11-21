@@ -5,6 +5,7 @@ import { decryptSecret, encryptSecret } from '../../auth/crypto.js';
 import { ValidationError } from '../../errors.js';
 import { authedPlugin, ctx, idParam, intParam, parse, q } from '../http.js';
 import { imapClient, ingestStatementPdf, ingestText, runMailbox, safeError } from './service.js';
+import { extractPdfText, makeStampLookup } from './statementParser.js';
 
 /**
  * DTEs recibidos (F6): subir JSON de proveedores o leerlos del buzón IMAP de
@@ -23,13 +24,22 @@ const MailboxBody = z.object({
 
 export async function registerReceivedRoutes(app: FastifyInstance): Promise<void> {
   await authedPlugin(app, (r) => {
-    r.post('/v2/received/upload', { preHandler: requirePerm('accounting:post') }, async (req) => {
+    r.post('/v2/received/upload', { preHandler: requirePerm('accounting:post'), bodyLimit: 40 * 1024 * 1024 }, async (req) => {
       const c = ctx(req);
-      const b = parse(z.object({ files: z.array(z.object({ name: z.string().max(200), content: z.string().max(600_000) })).min(1).max(200) }), req.body);
+      const b = parse(z.object({ files: z.array(z.object({
+        name: z.string().max(200), content: z.string().max(600_000).optional(), content_base64: z.string().max(11_500_000).optional(),
+      })).min(1).max(200) }), req.body);
+      // Los PDF que se suben junto a los JSON aportan el sello cuando el JSON no lo trae
+      const pdfs = b.files.filter(f => f.content_base64 && /\.pdf$/i.test(f.name));
+      const stampFor = makeStampLookup(async () => {
+        const texts: string[] = [];
+        for (const f of pdfs.slice(0, 200)) texts.push(await extractPdfText(Buffer.from(f.content_base64!, 'base64')).catch(() => ''));
+        return texts.filter(Boolean);
+      }, b.files.filter(x => typeof x.content === 'string').length === 1);
       const results = [];
-      for (const f of b.files) {
+      for (const f of b.files.filter(x => typeof x.content === 'string')) {
         try {
-          const out = await ingestText(c, f.content, 'upload', { file_name: f.name });
+          const out = await ingestText(c, f.content!, 'upload', { file_name: f.name }, pdfs.length ? stampFor : undefined);
           results.push(out.ok
             ? { file: f.name, code: out.code, ...out.result, warnings: out.warnings }
             : { file: f.name, status: 'error', detail: out.error });

@@ -179,4 +179,35 @@ describe.skipIf(!hasDb)('gastos financieros: intereses de bancos y estados de cu
         account: 'Tarjeta ****9999', cut_date: '2026-12-08', interest_total: 100, lines: [] }), 'upload', '{}'])).rows[0]!.r;
     expect(otroMes.status).toBe('registrado');
   });
+
+  it('DTE de producción sin sello en el JSON: toma el sello del PDF o queda con sello pendiente', async () => {
+    const sinSello = (code: string) => {
+      const j = JSON.parse(bankDte(code, { nit: '06142203131020', nrc: '2241857', nombre: 'SAC Multimoney, S.A.', codActividad: '64199' },
+        [['INTERESES CREDITO', 368.17]], '2026-10-14'));
+      delete j.selloRecibido;
+      j.identificacion.ambiente = '01';
+      return JSON.stringify(j);
+    };
+    const sello = '2026542068FC527D4DCBBF2FDF9C81866A0A988I';
+    const pdf = await new Promise<Buffer>((resolve) => {
+      const doc = new PDFDocument({ size: 'LETTER' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.fontSize(9).text('COD. GENERADOR: BAF9FB7E-AE65-4895-94E3-33A2662FDF95', 40, 40).text(`SELLO RECEPCIÓN: ${sello}`, 40, 60);
+      doc.end();
+    });
+    const res = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files: [
+      { name: 'mm.json', content: sinSello('BAF9FB7E-AE65-4895-94E3-33A2662FDF95') },
+      { name: 'mm.pdf', content_base64: pdf.toString('base64') },
+      { name: 'mm2.json', content: sinSello('3C44CABE-9D37-4A14-877E-B69490284F11') },
+    ] } });
+    const [conPdf, sinPdf] = res.json().results;
+    expect(conPdf, res.body).toMatchObject({ status: 'registrado', warnings: expect.arrayContaining(['Sello de recepción tomado del PDF']) });
+    const c1 = await compra(conPdf.compra_id);
+    expect(c1.metadata).toMatchObject({ selloRecibido: sello, categoria: 'gasto_financiero' });
+    expect(c1.metadata.selloPendiente).toBeUndefined();
+    expect(sinPdf).toMatchObject({ status: 'registrado', detail: expect.stringMatching(/no trae sello/) });
+    expect((await compra(sinPdf.compra_id)).metadata.selloPendiente).toBe(true);
+  });
 });

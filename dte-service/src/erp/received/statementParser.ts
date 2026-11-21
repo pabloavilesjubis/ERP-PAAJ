@@ -135,3 +135,24 @@ export function statementPasswords(dui: string | null | undefined, nit: string |
   else if (n.length === 9 && n !== d) out.push(n, `${n.slice(0, 8)}-${n[8]}`);
   return out;
 }
+
+/** Sello de recepción del MH impreso en el PDF: año + 32 hexadecimales + 4 caracteres (40). */
+export function stampInPdfText(text: string): string | null {
+  const m = /\b(20\d{2}[0-9A-F]{32}[0-9A-Z]{4})\b/.exec(text.toUpperCase());
+  return m ? m[1]! : null;
+}
+
+/**
+ * Busca el sello de un DTE en los PDF que lo acompañan: el PDF que menciona su
+ * código de generación o número de control; con un solo JSON y un solo PDF, ese.
+ */
+export function makeStampLookup(loadTexts: () => Promise<string[]>, allowSingle: boolean): (code: string, control: string | null) => Promise<string | null> {
+  let texts: Promise<string[]> | null = null;
+  const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return async (code, control) => {
+    texts ??= loadTexts().catch(() => []);
+    const all = await texts;
+    const mine = all.find(t => norm(t).includes(norm(code)) || (control && norm(t).includes(norm(control)))) ?? (allowSingle && all.length === 1 ? all[0] : undefined);
+    return mine ? stampInPdfText(mine) : null;
+  };
+}

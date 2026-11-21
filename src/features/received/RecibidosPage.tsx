@@ -59,7 +59,10 @@ export function RecibidosPage() {
   });
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
-      const payload = await Promise.all(files.map(async f => ({ name: f.name, content: await f.text() })));
+      // JSON como texto; los PDF (con el sello cuando el JSON no lo trae) en base64
+      const payload = await Promise.all(files.map(async f => /\.pdf$/i.test(f.name)
+        ? { name: f.name, content_base64: await toBase64(f) }
+        : { name: f.name, content: await f.text() }));
       return api.post<{ results: UploadResult[] }>('/v2/received/upload', { files: payload });
     },
     onSuccess: r => {
@@ -77,14 +80,14 @@ export function RecibidosPage() {
         <div className="toolbar" style={{ marginTop: 'var(--s-5)' }}>
           <label className="btn btn-primary" style={{ cursor: 'pointer' }}>
             {upload.isPending ? 'Procesando…' : 'Subir JSON de DTEs'}
-            <input type="file" accept=".json,application/json" multiple hidden onChange={e => {
+            <input type="file" accept=".json,application/json,.pdf,application/pdf" multiple hidden onChange={e => {
               // Copia antes de limpiar el input: la FileList es "viva" y se vacía con value = ''
               const files = [...(e.target.files ?? [])];
               e.target.value = '';
               if (files.length) upload.mutate(files);
             }} />
           </label>
-          <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Puedes elegir varios archivos a la vez.</span>
+          <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>Puedes elegir varios a la vez; incluye el PDF si el JSON no trae el sello del MH.</span>
           <label className="btn btn-secondary" style={{ cursor: 'pointer', marginLeft: 'auto' }}>
             {previewStatement.isPending ? 'Leyendo PDF…' : 'Subir estado de cuenta (PDF)'}
             <input type="file" accept=".pdf,application/pdf" hidden onChange={e => {
