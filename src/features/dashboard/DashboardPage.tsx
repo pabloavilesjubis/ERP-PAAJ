@@ -22,8 +22,8 @@ export function DashboardPage() {
       return Array.from({ length: 12 }, (_, mi) => {
         const vc = data.ventasConsumidor.filter(r => inPeriod(r.fecha, mi, year)).reduce((s, r) => s + num(r.monto), 0);
         const vt = data.ventasContribuyente.filter(r => inPeriod(r.fecha, mi, year)).reduce((s, r) => s + num(r.gravado) + num(r.exento), 0);
-        const cp = data.compras.filter(r => inPeriod(r.fecha, mi, year)).reduce((s, r) => s + num(r.monto), 0);
-        return { label: MONTHS[mi].slice(0, 3), total: vc + vt, cp };
+        const { cp, fin } = splitCompras(data.compras.filter(r => inPeriod(r.fecha, mi, year)));
+        return { label: MONTHS[mi].slice(0, 3), total: vc + vt, cp, fin };
       });
     }
     return Array.from({ length: 6 }, (_, i) => {
@@ -32,11 +32,13 @@ export function DashboardPage() {
       const yi = year + Math.floor(offset / 12);
       const vc = data.ventasConsumidor.filter(r => inPeriod(r.fecha, mi, yi)).reduce((s, r) => s + num(r.monto), 0);
       const vt = data.ventasContribuyente.filter(r => inPeriod(r.fecha, mi, yi)).reduce((s, r) => s + num(r.gravado) + num(r.exento), 0);
-      const cp = data.compras.filter(r => inPeriod(r.fecha, mi, yi)).reduce((s, r) => s + num(r.monto), 0);
-      return { label: MONTHS[mi].slice(0, 3), total: vc + vt, cp };
+      const { cp, fin } = splitCompras(data.compras.filter(r => inPeriod(r.fecha, mi, yi)));
+      return { label: MONTHS[mi].slice(0, 3), total: vc + vt, cp, fin };
     });
   }, [data, month, year, mode]);
-  const maxVal = Math.max(...monthsData.map(d => Math.max(d.total, d.cp)), 1);
+  const maxVal = Math.max(...monthsData.map(d => Math.max(d.total, d.cp + d.fin)), 1);
+  const finMes = useMemo(() => splitCompras(data.compras.filter(r => mode === 'annual'
+    ? (r.fecha ?? '').startsWith(String(year)) : inPeriod(r.fecha, month, year))), [data, month, year, mode]);
 
   return (
     <div>
@@ -49,7 +51,9 @@ export function DashboardPage() {
         <KpiCard
           label="Total compras"
           value={fmt(summary.totalCompras)}
-          hint={`${summary.countCp} registros este mes`}
+          hint={finMes.fin > 0
+            ? <>Compras {fmt(finMes.cp)}<br />Gasto financiero {fmt(finMes.fin)}</>
+            : `${summary.countCp} registros este mes`}
         />
         <KpiCard
           label="IVA débito (ventas)" tone="danger"
@@ -113,7 +117,11 @@ export function DashboardPage() {
               <div className="bar-group" key={i}>
                 <div className="bars">
                   <div className="bar" title={`Ventas: ${fmt(d.total)}`} style={{ height: `${(d.total / maxVal) * 110}px`, background: 'var(--brand-primary-500)' }} />
-                  <div className="bar" title={`Compras: ${fmt(d.cp)}`} style={{ height: `${(d.cp / maxVal) * 110}px`, background: 'var(--brand-accent-500)' }} />
+                  {/* Compras apiladas: gasto financiero arriba, en otro color */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }} title={`Compras: ${fmt(d.cp)} · Gasto financiero: ${fmt(d.fin)}`}>
+                    {d.fin > 0 && <div className="bar" style={{ height: `${(d.fin / maxVal) * 110}px`, background: 'var(--info)', borderRadius: d.cp > 0 ? '3px 3px 0 0' : undefined }} />}
+                    {(d.cp > 0 || d.fin === 0) && <div className="bar" style={{ height: `${(d.cp / maxVal) * 110}px`, background: 'var(--brand-accent-500)', borderRadius: d.fin > 0 ? 0 : undefined }} />}
+                  </div>
                 </div>
                 <div className="bar-label">{d.label}</div>
               </div>
@@ -122,6 +130,7 @@ export function DashboardPage() {
           <div className="chart-legend">
             <div className="legend-item"><div className="legend-dot" style={{ background: 'var(--brand-primary-500)' }} />Ventas</div>
             <div className="legend-item"><div className="legend-dot" style={{ background: 'var(--brand-accent-500)' }} />Compras</div>
+            {monthsData.some(d => d.fin > 0) && <div className="legend-item"><div className="legend-dot" style={{ background: 'var(--info)' }} />Gasto financiero</div>}
           </div>
         </div>
       </div>
@@ -139,4 +148,15 @@ function TaxRow({ label, sub, value, variant }: { label: string; sub?: string; v
       <div className={`tax-row-value${variant ? ' ' + variant : ''}`}>{value}</div>
     </div>
   );
+}
+
+/** Compras del período separadas en compras normales y gasto financiero (intereses de bancos). */
+function splitCompras(rows: Array<{ monto: string | number; metadata?: { categoria?: string; anulado?: boolean } }>): { cp: number; fin: number } {
+  let cp = 0;
+  let fin = 0;
+  for (const r of rows) {
+    if (r.metadata?.categoria === 'gasto_financiero') { if (!r.metadata?.anulado) fin += num(r.monto); }
+    else cp += num(r.monto);
+  }
+  return { cp, fin };
 }

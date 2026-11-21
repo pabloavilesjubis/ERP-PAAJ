@@ -121,6 +121,8 @@ export interface CompraMetadata {
   detalleIntereses?: Array<{ fecha?: string; descripcion: string; monto: number }>;
   otrosCargos?: Array<{ fecha?: string; descripcion: string; monto: number }>;
   deducibleRenta?: boolean;
+  /** El JSON del DTE no traía el sello de recepción del MH */
+  selloPendiente?: boolean;
   /** Estado de cuenta: tarjeta/cuenta enmascarada y fecha de corte */
   cuenta?: string;
   fechaCorte?: string;

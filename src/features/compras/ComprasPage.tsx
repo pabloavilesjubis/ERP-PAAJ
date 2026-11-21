@@ -252,6 +252,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
   const interesesAnio = financierosAnio.reduce((s, r) => s + interesesDe(r), 0);
   const totalMonto = rows.reduce((s, r) => s + num(r.monto), 0);
   const totalIva = rows.reduce((s, r) => s + num(r.ivaCredito), 0);
+  const totalFinanciero = rows.filter(r => r.metadata?.categoria === 'gasto_financiero' && !r.metadata?.anulado).reduce((s, r) => s + num(r.monto), 0);
   const totalRetenido = rows.reduce((s, r) => s + num(r.metadata?.retencionRenta ?? 0), 0);
   const countConRetencion = rows.filter(r => num(r.metadata?.retencionRenta ?? 0) > 0).length;
 
@@ -484,6 +485,7 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       pdfFilename,
       // Lo que llega del buzón o de un estado de cuenta se conserva al editar
       ivaNoDeducible: pm.ivaNoDeducible,
+      selloPendiente: form.selloRecibido ? undefined : pm.selloPendiente,
       origen: pm.origen,
       cuenta: pm.cuenta,
       fechaCorte: pm.fechaCorte,
@@ -579,7 +581,10 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
       </div>
 
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 'var(--s-5)' }}>
-        <KpiCard label="Total compras" size="md" value={fmt(totalMonto)} hint={`${rows.length} registros`} />
+        <KpiCard label="Total compras" size="md" value={fmt(totalMonto)}
+          hint={totalFinanciero > 0
+            ? <>Compras {fmt(totalMonto - totalFinanciero)}<br />Gasto financiero {fmt(totalFinanciero)}</>
+            : `${rows.length} registros`} />
         <KpiCard label="IVA crédito fiscal" tone="success" size="md" value={fmt(totalIva)} hint="Acreditable contra débito" />
         <KpiCard label="Subtotal (sin IVA)" size="md" value={fmt(totalMonto - totalIva)} hint="Costo neto" />
         {interesesAnio > 0 && (
@@ -633,7 +638,16 @@ function MovimientosTab({ data, setCollection, patch, mode, month, year }: TabPr
                         {m.claseDocumento ?? '—'}/{m.tipoDocumento ?? '—'}
                       </span>
                     </td>
-                    <td><code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{docCorto}</code></td>
+                    <td>
+                      <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{docCorto}</code>
+                      {m.claseDocumento === '4' && m.numeroDocumento && /^[0-9A-F-]{36}$/i.test(m.numeroDocumento) && (
+                        <div style={{ fontSize: 'var(--text-xs)' }}>
+                          {m.selloPendiente && <span className="badge badge-warning" title="El JSON no traía sello del MH">Sello pendiente</span>}{' '}
+                          <a href={`https://admin.factura.gob.sv/consultaPublica?ambiente=01&codGen=${m.numeroDocumento.toUpperCase()}&fechaEmi=${r.fecha.slice(0, 10)}`}
+                            target="_blank" rel="noreferrer" title="Abre la consulta pública del Ministerio de Hacienda con este código y fecha">Verificar en MH</a>
+                        </div>
+                      )}
+                    </td>
                     <td style={{ fontWeight: 500 }}>
                       {r.proveedor}
                       {esFinanciero(r) && (
