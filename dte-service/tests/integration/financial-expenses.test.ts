@@ -210,4 +210,12 @@ describe.skipIf(!hasDb)('gastos financieros: intereses de bancos y estados de cu
     expect(sinPdf).toMatchObject({ status: 'registrado', detail: expect.stringMatching(/no trae sello/) });
     expect((await compra(sinPdf.compra_id)).metadata.selloPendiente).toBe(true);
   });
+
+  it('receptor identificado como NIT (36) con los 9 dígitos del DUI: es la empresa', async () => {
+    const j = JSON.parse(bankDte('C1C1C1C1-0000-4BB5-BBDD-C047A433B967',
+      { nit: '06142711081020', nrc: '123456', nombre: 'Restaurante de Prueba, S.A. de C.V.', codActividad: '56101' }, [['Consumo', 103.13]], '2026-03-29'));
+    j.receptor = { tipoDocumento: '36', numDocumento: DUI, nrc: null, nombre: 'MARIA PEREZ' };
+    const res = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files: [{ name: 'nit9.json', content: JSON.stringify(j) }] } });
+    expect(res.json().results[0], res.body).toMatchObject({ status: 'registrado' });
+  });
 });
