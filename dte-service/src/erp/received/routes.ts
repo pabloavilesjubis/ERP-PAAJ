@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret } from '../../auth/crypto.js';
 import { ValidationError } from '../../errors.js';
 import { authedPlugin, ctx, idParam, intParam, parse, q } from '../http.js';
 import { imapClient, ingestStatementPdf, ingestText, runMailbox, safeError } from './service.js';
-import { extractPdfText, makeStampLookup } from './statementParser.js';
+import { extractPdfText, stampInPdfText } from './statementParser.js';
 
 /**
  * DTEs recibidos (F6): subir JSON de proveedores o leerlos del buzón IMAP de
@@ -29,19 +29,44 @@ export async function registerReceivedRoutes(app: FastifyInstance): Promise<void
       const b = parse(z.object({ files: z.array(z.object({
         name: z.string().max(200), content: z.string().max(600_000).optional(), content_base64: z.string().max(11_500_000).optional(),
       })).min(1).max(200) }), req.body);
-      // Los PDF que se suben junto a los JSON aportan el sello cuando el JSON no lo trae
-      const pdfs = b.files.filter(f => f.content_base64 && /\.pdf$/i.test(f.name));
-      const stampFor = makeStampLookup(async () => {
-        const texts: string[] = [];
-        for (const f of pdfs.slice(0, 200)) texts.push(await extractPdfText(Buffer.from(f.content_base64!, 'base64')).catch(() => ''));
-        return texts.filter(Boolean);
-      }, b.files.filter(x => typeof x.content === 'string').length === 1);
+      // Los PDF que se suben junto a los JSON: aportan el sello si el JSON no lo trae y quedan guardados en la compra
+      const jsonFiles = b.files.filter(x => typeof x.content === 'string');
+      const pdfFiles = b.files.filter(f => f.content_base64 && /\.pdf$/i.test(f.name))
+        .map(f => ({ name: f.name, bytes: Buffer.from(f.content_base64!, 'base64') }))
+        .filter(f => f.bytes.length <= 10 * 1024 * 1024 && f.bytes.subarray(0, 5).toString('latin1') === '%PDF-');
+      let loaded: Promise<Array<{ name: string; bytes: Buffer; text: string }>> | null = null;
+      const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const pdfFor = async (code: string, control: string | null) => {
+        loaded ??= Promise.all(pdfFiles.map(async f => ({ ...f, text: await extractPdfText(f.bytes).catch(() => '') })));
+        const all = await loaded;
+        return all.find(f => norm(f.name).includes(norm(code)) || norm(f.text).includes(norm(code))
+            || (!!control && norm(f.text).includes(norm(control))))
+          ?? (jsonFiles.length === 1 && all.length === 1 ? all[0] : undefined);
+      };
+      const stampFor = async (code: string, control: string | null) => {
+        const f = await pdfFor(code, control);
+        return f ? stampInPdfText(f.text) : null;
+      };
       const results = [];
-      for (const f of b.files.filter(x => typeof x.content === 'string')) {
+      for (const f of jsonFiles) {
         try {
-          const out = await ingestText(c, f.content!, 'upload', { file_name: f.name }, pdfs.length ? stampFor : undefined);
+          const out = await ingestText(c, f.content!, 'upload', { file_name: f.name }, pdfFiles.length ? stampFor : undefined);
+          let pdfSaved = false;
+          if (out.ok && pdfFiles.length && out.result.status !== 'rechazado') {
+            // Registrado ahora o ya registrado antes: el PDF queda con la compra (si aún no tiene)
+            const compraId = out.result.compra_id ?? (await q<{ compra_id: number }>(
+              `SELECT compra_id FROM accounting.received_dtes WHERE tenant_id = $1 AND upper(generation_code) = upper($2)
+                 AND status = 'registrado' AND compra_id IS NOT NULL ORDER BY id LIMIT 1`, [c.tenantId, out.code])).rows[0]?.compra_id;
+            const pdf = compraId ? await pdfFor(out.code, out.control) : undefined;
+            if (compraId && pdf) {
+              const ins = await q(`INSERT INTO public.compra_adjuntos (tenant_id, compra_id, kind, filename, mime, size, content, uploaded_by)
+                                   VALUES ($1, $2, 'pdf', $3, 'application/pdf', $4, $5, $6) ON CONFLICT (compra_id, kind) DO NOTHING`,
+                [c.tenantId, compraId, pdf.name, pdf.bytes.length, pdf.bytes, c.userName]);
+              pdfSaved = (ins.rowCount ?? 0) > 0;
+            }
+          }
           results.push(out.ok
-            ? { file: f.name, code: out.code, ...out.result, warnings: out.warnings }
+            ? { file: f.name, code: out.code, ...out.result, warnings: [...out.warnings, ...(pdfSaved ? ['PDF guardado con la compra'] : [])] }
             : { file: f.name, status: 'error', detail: out.error });
         } catch (e) {
           results.push({ file: f.name, status: 'error', detail: e instanceof Error ? e.message : String(e) });
@@ -68,7 +93,8 @@ export async function registerReceivedRoutes(app: FastifyInstance): Promise<void
       if (qp.q) { params.push(`%${qp.q}%`); where += ` AND (issuer_name ILIKE $${params.length} OR control_number ILIKE $${params.length} OR generation_code ILIKE $${params.length})`; }
       const limit = intParam(qp.limit, 300, 2000);
       const res = await q(`SELECT id, source, status, detail, generation_code, control_number, document_type, issue_date, issuer_name, issuer_nrc,
-                                  taxable_amount, iva_amount, total_amount, compra_id, file_name, mail_from, created_at
+                                  taxable_amount, iva_amount, total_amount, compra_id, file_name, mail_from, created_at,
+                                  EXISTS (SELECT 1 FROM public.compra_adjuntos a WHERE a.compra_id = received_dtes.compra_id AND a.kind = 'pdf') AS has_pdf
                              FROM accounting.received_dtes WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT ${limit}`, params);
       return { items: res.rows };
     });

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
+import { env } from '@/config/env';
+import { dteAuthHeaders } from '@/lib/dte/tenant-routing';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
@@ -17,7 +19,7 @@ interface Received {
   id: number; source: 'upload' | 'email'; status: 'registrado' | 'duplicado' | 'rechazado'; detail: string | null;
   generation_code: string; control_number: string | null; document_type: string; issue_date: string | null;
   issuer_name: string | null; issuer_nrc: string | null; taxable_amount: number; iva_amount: number; total_amount: number;
-  compra_id: number | null; file_name: string | null; mail_from: string | null; created_at: string;
+  compra_id: number | null; file_name: string | null; mail_from: string | null; created_at: string; has_pdf?: boolean;
 }
 interface UploadResult { file: string; status: string; detail: string | null; code?: string; warnings?: string[] }
 
@@ -117,7 +119,7 @@ export function RecibidosPage() {
       {list.isLoading ? <Loading /> : !(list.data ?? []).length ? <EmptyState title="Aún no hay DTEs recibidos" /> : (
         <div className="table-wrap"><div className="table-scroll">
           <table className="acc-table">
-            <thead><tr><th>Fecha</th><th>Tipo</th><th>Proveedor</th><th>Número de control</th><th className="num">Gravado</th><th className="num">IVA</th><th className="num">Total</th><th>Estado</th><th>Origen</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Tipo</th><th>Proveedor</th><th>Número de control</th><th className="num">Gravado</th><th className="num">IVA</th><th className="num">Total</th><th>Estado</th><th>Origen</th><th /></tr></thead>
             <tbody>{list.data!.map(d => (
               <tr key={d.id} className="clickable" onClick={() => setShowRaw(d.id)}>
                 <td className="code">{dmy(d.issue_date)}</td><td>{TYPE[d.document_type] ?? d.document_type}</td>
@@ -126,6 +128,9 @@ export function RecibidosPage() {
                 <td className="num">{money(d.taxable_amount)}</td><td className="num">{money(d.iva_amount)}</td><td className="num">{money(d.total_amount)}</td>
                 <td><Badge tone={TONE[d.status]}>{d.status}</Badge>{(d.status !== 'registrado' || /gasto financiero/.test(d.detail ?? '')) && <div className="muted" style={{ fontSize: 'var(--text-xs)', maxWidth: 260, whiteSpace: 'normal' }}>{d.detail}</div>}</td>
                 <td className="muted">{d.source === 'email' ? (d.mail_from ?? 'correo') : (d.file_name ?? 'subido')}</td>
+                <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                  {d.compra_id && d.has_pdf && <Button size="sm" variant="secondary" onClick={() => void abrirPdf(d.compra_id!)} title="PDF guardado con la compra">PDF</Button>}
+                </td>
               </tr>
             ))}</tbody>
           </table>
@@ -186,4 +191,19 @@ function StatementModal({ file, preview, onClose, onDone }: { file: File; previe
       </p>
     </Modal>
   );
+}
+
+/** Abre el PDF guardado con la compra (subido junto al JSON o tomado del correo). */
+async function abrirPdf(compraId: number) {
+  const tab = window.open('', '_blank');   // antes del fetch, para que el navegador no la bloquee
+  try {
+    const res = await fetch(`${env.dteServiceUrl.replace(/\/$/, '')}/v2/compras/${compraId}/adjuntos/pdf`, { headers: dteAuthHeaders() });
+    if (!res.ok) throw new Error(res.status === 404 ? 'El PDF ya no está en el servidor' : `HTTP ${res.status}`);
+    const href = URL.createObjectURL(await res.blob());
+    if (tab) tab.location.href = href;
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  } catch (e) {
+    tab?.close();
+    window.alert?.(e instanceof Error ? e.message : 'No se pudo abrir el PDF');
+  }
 }

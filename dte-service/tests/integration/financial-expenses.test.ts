@@ -218,4 +218,27 @@ describe.skipIf(!hasDb)('gastos financieros: intereses de bancos y estados de cu
     const res = await app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files: [{ name: 'nit9.json', content: JSON.stringify(j) }] } });
     expect(res.json().results[0], res.body).toMatchObject({ status: 'registrado' });
   });
+
+  it('receptor con tipo 37 («otro») y el DUI: es la empresa; el PDF subido queda con la compra', async () => {
+    const code = 'D2D2D2D2-0000-4BB5-BBDD-C047A433B967';
+    const j = JSON.parse(bankDte(code, { nit: '06140101001234', nrc: '1234', nombre: 'Tienda Departamental de Prueba, S.A. de C.V.', codActividad: '47190' },
+      [['Ropa', 59.9]], '2026-11-20'));
+    j.receptor = { tipoDocumento: '37', numDocumento: DUI, nrc: null, nombre: HOLDER };
+    const pdf = await new Promise<Buffer>((resolve) => {
+      const doc = new PDFDocument({ size: 'LETTER' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.fontSize(9).text(`Codigo de generacion: ${code}`, 40, 40);
+      doc.end();
+    });
+    const up = (files: unknown[]) => app.inject({ method: 'POST', url: '/v2/received/upload', headers: auth(t.token), payload: { files } });
+    // Primero solo el JSON; luego el mismo JSON con su PDF: ya registrado, el PDF se agrega a la compra
+    const r1 = (await up([{ name: 'siman.json', content: JSON.stringify(j) }])).json().results[0];
+    expect(r1, JSON.stringify(r1)).toMatchObject({ status: 'registrado' });
+    const r2 = (await up([{ name: 'siman.json', content: JSON.stringify(j) }, { name: `${code}.pdf`, content_base64: pdf.toString('base64') }])).json().results[0];
+    expect(r2).toMatchObject({ status: 'duplicado', warnings: expect.arrayContaining(['PDF guardado con la compra']) });
+    const list = (await app.inject({ method: 'GET', url: `/v2/received?q=${code}`, headers: auth(t.token) })).json().items;
+    expect(list.find((x: { status: string }) => x.status === 'registrado')).toMatchObject({ has_pdf: true });
+  });
 });

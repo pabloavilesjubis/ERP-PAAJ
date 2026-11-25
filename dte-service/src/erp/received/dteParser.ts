@@ -212,9 +212,10 @@ export function parseDteJson(rawText: string): DteParseOutcome {
   const docNum = digits(r?.numDocumento)
   const receiver = r
     ? {
-        nit: digits(r.nit) || (r.tipoDocumento === '36' ? docNum : ''),
+        // 13 DUI, 36 NIT; con 37 («otro») u otro tipo, el número dice qué es: 9 dígitos DUI, 14 NIT
+        nit: digits(r.nit) || (r.tipoDocumento === '36' || (r.tipoDocumento !== '13' && docNum.length === 14) ? docNum : ''),
         nrc: digits(r.nrc),
-        dui: r.tipoDocumento === '13' ? docNum : '',
+        dui: r.tipoDocumento === '13' || (r.tipoDocumento !== '36' && docNum.length === 9) ? docNum : '',
         name: String(r.nombre ?? '').trim(),
       }
     : null
